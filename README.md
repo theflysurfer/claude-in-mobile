@@ -32,9 +32,21 @@ npm run build
 
 ## Configuration
 
-Add to your Claude Code settings:
+### Claude Code CLI (recommended)
 
-### Using npx (recommended)
+```bash
+claude mcp add --transport stdio android -- npx -y claude-in-android
+```
+
+To add globally (available in all projects):
+
+```bash
+claude mcp add --scope user --transport stdio android -- npx -y claude-in-android
+```
+
+### Manual configuration
+
+Add to your Claude Code settings (`~/.claude.json` or project settings):
 
 ```json
 {
@@ -47,17 +59,10 @@ Add to your Claude Code settings:
 }
 ```
 
-### Using local build
+### Windows
 
-```json
-{
-  "mcpServers": {
-    "android": {
-      "command": "node",
-      "args": ["/path/to/claude-in-android/dist/index.js"]
-    }
-  }
-}
+```bash
+claude mcp add --transport stdio android -- cmd /c npx -y claude-in-android
 ```
 
 ## Requirements
