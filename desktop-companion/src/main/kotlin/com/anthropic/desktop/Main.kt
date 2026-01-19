@@ -40,11 +40,17 @@ fun main() = runBlocking {
         MonitorsResult(monitors = screenCapture.getMonitors())
     }
 
-    // Tap
+    // Tap (with optional targetPid for background mode - no focus stealing)
     server.registerVoidHandler("tap") { params ->
         val x = params.intOrThrow("x")
         val y = params.intOrThrow("y")
-        inputController.tap(x, y)
+        val targetPid = params.int("targetPid")
+
+        if (targetPid != null && targetPid > 0) {
+            inputController.tapToPid(x, y, targetPid)
+        } else {
+            inputController.tap(x, y)
+        }
     }
 
     // Double tap
@@ -95,19 +101,33 @@ fun main() = runBlocking {
     }
 
     // Input text (use direct typing for Compose Desktop compatibility)
+    // With optional targetPid for background mode - no focus stealing
     server.registerVoidHandler("input_text") { params ->
         val text = params.stringOrThrow("text")
-        // Use typeTextDirect for Compose Desktop - clipboard paste often fails
-        // Small delay to ensure target field has focus
-        Thread.sleep(50)
-        inputController.typeTextDirect(text)
+        val targetPid = params.int("targetPid")
+
+        if (targetPid != null && targetPid > 0) {
+            // CGEvent-based input - sends directly to process without stealing focus
+            inputController.typeTextToPid(text, targetPid)
+        } else {
+            // Use typeTextDirect for Compose Desktop - clipboard paste often fails
+            // Small delay to ensure target field has focus
+            Thread.sleep(50)
+            inputController.typeTextDirect(text)
+        }
     }
 
-    // Key event
+    // Key event (with optional targetPid for background mode)
     server.registerVoidHandler("key_event") { params ->
         val key = params.stringOrThrow("key")
         val modifiers = params.stringList("modifiers")
-        inputController.keyEvent(key, modifiers)
+        val targetPid = params.int("targetPid")
+
+        if (targetPid != null && targetPid > 0) {
+            inputController.keyEventToPid(key, targetPid, modifiers)
+        } else {
+            inputController.keyEvent(key, modifiers)
+        }
     }
 
     // Get UI hierarchy

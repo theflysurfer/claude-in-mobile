@@ -72,8 +72,9 @@ export declare class DesktopClient extends EventEmitter {
     screenshotWithMeta(options?: ScreenshotOptions): Promise<ScreenshotResult>;
     /**
      * Tap at coordinates
+     * @param targetPid - Optional PID to send click without stealing focus (macOS only)
      */
-    tap(x: number, y: number): Promise<void>;
+    tap(x: number, y: number, targetPid?: number): Promise<void>;
     /**
      * Long press at coordinates
      */
@@ -88,12 +89,18 @@ export declare class DesktopClient extends EventEmitter {
     swipeDirection(direction: "up" | "down" | "left" | "right", distance?: number): Promise<void>;
     /**
      * Input text
+     * @param targetPid - Optional PID to send input without stealing focus (macOS only)
      */
-    inputText(text: string): Promise<void>;
+    inputText(text: string, targetPid?: number): Promise<void>;
     /**
      * Press key
+     * @param targetPid - Optional PID to send key without stealing focus (macOS only)
      */
-    pressKey(key: string, modifiers?: string[]): Promise<void>;
+    pressKey(key: string, modifiers?: string[], targetPid?: number): Promise<void>;
+    /**
+     * Get the PID of the focused window (for background input)
+     */
+    getFocusedWindowPid(): Promise<number | null>;
     /**
      * Get UI hierarchy
      */

@@ -243,11 +243,12 @@ export class DeviceManager {
     }
     /**
      * Tap at coordinates
+     * @param targetPid - Optional PID for desktop background mode (no focus stealing)
      */
-    async tap(x, y, platform) {
+    async tap(x, y, platform, targetPid) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
-            await client.tap(x, y);
+            await client.tap(x, y, targetPid);
         }
         else {
             client.tap(x, y);
@@ -295,11 +296,12 @@ export class DeviceManager {
     }
     /**
      * Input text
+     * @param targetPid - Optional PID for desktop background mode (no focus stealing)
      */
-    async inputText(text, platform) {
+    async inputText(text, platform, targetPid) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
-            await client.inputText(text);
+            await client.inputText(text, targetPid);
         }
         else {
             client.inputText(text);
@@ -307,11 +309,12 @@ export class DeviceManager {
     }
     /**
      * Press key
+     * @param targetPid - Optional PID for desktop background mode (no focus stealing)
      */
-    async pressKey(key, platform) {
+    async pressKey(key, platform, targetPid) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
-            await client.pressKey(key);
+            await client.pressKey(key, undefined, targetPid);
         }
         else {
             client.pressKey(key);

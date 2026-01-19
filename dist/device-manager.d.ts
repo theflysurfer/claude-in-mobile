@@ -84,8 +84,9 @@ export declare class DeviceManager {
     screenshotRaw(platform?: Platform): string;
     /**
      * Tap at coordinates
+     * @param targetPid - Optional PID for desktop background mode (no focus stealing)
      */
-    tap(x: number, y: number, platform?: Platform): Promise<void>;
+    tap(x: number, y: number, platform?: Platform, targetPid?: number): Promise<void>;
     /**
      * Long press
      */
@@ -100,12 +101,14 @@ export declare class DeviceManager {
     swipeDirection(direction: "up" | "down" | "left" | "right", platform?: Platform): Promise<void>;
     /**
      * Input text
+     * @param targetPid - Optional PID for desktop background mode (no focus stealing)
      */
-    inputText(text: string, platform?: Platform): Promise<void>;
+    inputText(text: string, platform?: Platform, targetPid?: number): Promise<void>;
     /**
      * Press key
+     * @param targetPid - Optional PID for desktop background mode (no focus stealing)
      */
-    pressKey(key: string, platform?: Platform): Promise<void>;
+    pressKey(key: string, platform?: Platform, targetPid?: number): Promise<void>;
     /**
      * Launch app
      */

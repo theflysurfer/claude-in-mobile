@@ -334,9 +334,10 @@ export class DesktopClient extends EventEmitter {
     }
     /**
      * Tap at coordinates
+     * @param targetPid - Optional PID to send click without stealing focus (macOS only)
      */
-    async tap(x, y) {
-        await this.sendRequest("tap", { x, y });
+    async tap(x, y, targetPid) {
+        await this.sendRequest("tap", { x, y, targetPid });
     }
     /**
      * Long press at coordinates
@@ -358,15 +359,25 @@ export class DesktopClient extends EventEmitter {
     }
     /**
      * Input text
+     * @param targetPid - Optional PID to send input without stealing focus (macOS only)
      */
-    async inputText(text) {
-        await this.sendRequest("input_text", { text });
+    async inputText(text, targetPid) {
+        await this.sendRequest("input_text", { text, targetPid });
     }
     /**
      * Press key
+     * @param targetPid - Optional PID to send key without stealing focus (macOS only)
      */
-    async pressKey(key, modifiers) {
-        await this.sendRequest("key_event", { key, modifiers });
+    async pressKey(key, modifiers, targetPid) {
+        await this.sendRequest("key_event", { key, modifiers, targetPid });
+    }
+    /**
+     * Get the PID of the focused window (for background input)
+     */
+    async getFocusedWindowPid() {
+        const info = await this.getWindowInfo();
+        const focused = info.windows.find((w) => w.focused);
+        return focused?.processId ?? null;
     }
     /**
      * Get UI hierarchy

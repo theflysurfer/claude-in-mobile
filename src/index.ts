@@ -137,6 +137,10 @@ const tools: Tool[] = [
           type: "number",
           description: "Tap element by index from get_ui output (Android only)",
         },
+        targetPid: {
+          type: "number",
+          description: "Desktop only: PID of target process. When provided, sends tap without stealing window focus.",
+        },
         platform: platformParam,
       },
     },
@@ -214,6 +218,10 @@ const tools: Tool[] = [
           type: "string",
           description: "Text to type",
         },
+        targetPid: {
+          type: "number",
+          description: "Desktop only: PID of target process. When provided, sends input without stealing window focus.",
+        },
         platform: platformParam,
       },
       required: ["text"],
@@ -228,6 +236,10 @@ const tools: Tool[] = [
         key: {
           type: "string",
           description: "Key name: BACK, HOME, ENTER, TAB, DELETE, MENU, POWER, VOLUME_UP, VOLUME_DOWN, etc.",
+        },
+        targetPid: {
+          type: "number",
+          description: "Desktop only: PID of target process. When provided, sends key without stealing window focus.",
         },
         platform: platformParam,
       },
@@ -718,7 +730,8 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
         return { text: "Please provide x,y coordinates, text, resourceId, or index" };
       }
 
-      await deviceManager.tap(x, y, platform);
+      const targetPid = args.targetPid as number | undefined;
+      await deviceManager.tap(x, y, platform, targetPid);
       return { text: `Tapped at (${x}, ${y})` };
     }
 
@@ -771,12 +784,14 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
     }
 
     case "input_text": {
-      await deviceManager.inputText(args.text as string, platform);
+      const targetPid = args.targetPid as number | undefined;
+      await deviceManager.inputText(args.text as string, platform, targetPid);
       return { text: `Entered text: "${args.text}"` };
     }
 
     case "press_key": {
-      await deviceManager.pressKey(args.key as string, platform);
+      const targetPid = args.targetPid as number | undefined;
+      await deviceManager.pressKey(args.key as string, platform, targetPid);
       return { text: `Pressed key: ${args.key}` };
     }
 
@@ -912,7 +927,8 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       let result = "Desktop windows:\n";
       for (const w of windowInfo.windows) {
         const focused = w.focused ? " [FOCUSED]" : "";
-        result += `  • ${w.id} - ${w.title}${focused} (${w.bounds.width}x${w.bounds.height})\n`;
+        const pid = (w as any).processId ? ` PID:${(w as any).processId}` : "";
+        result += `  • ${w.id} - ${w.title}${focused}${pid} (${w.bounds.width}x${w.bounds.height})\n`;
       }
       return { text: result.trim() };
     }

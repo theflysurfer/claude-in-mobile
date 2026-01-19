@@ -413,9 +413,10 @@ export class DesktopClient extends EventEmitter {
 
   /**
    * Tap at coordinates
+   * @param targetPid - Optional PID to send click without stealing focus (macOS only)
    */
-  async tap(x: number, y: number): Promise<void> {
-    await this.sendRequest("tap", { x, y });
+  async tap(x: number, y: number, targetPid?: number): Promise<void> {
+    await this.sendRequest("tap", { x, y, targetPid });
   }
 
   /**
@@ -441,16 +442,27 @@ export class DesktopClient extends EventEmitter {
 
   /**
    * Input text
+   * @param targetPid - Optional PID to send input without stealing focus (macOS only)
    */
-  async inputText(text: string): Promise<void> {
-    await this.sendRequest("input_text", { text });
+  async inputText(text: string, targetPid?: number): Promise<void> {
+    await this.sendRequest("input_text", { text, targetPid });
   }
 
   /**
    * Press key
+   * @param targetPid - Optional PID to send key without stealing focus (macOS only)
    */
-  async pressKey(key: string, modifiers?: string[]): Promise<void> {
-    await this.sendRequest("key_event", { key, modifiers });
+  async pressKey(key: string, modifiers?: string[], targetPid?: number): Promise<void> {
+    await this.sendRequest("key_event", { key, modifiers, targetPid });
+  }
+
+  /**
+   * Get the PID of the focused window (for background input)
+   */
+  async getFocusedWindowPid(): Promise<number | null> {
+    const info = await this.getWindowInfo();
+    const focused = info.windows.find((w: DesktopWindow) => w.focused);
+    return focused?.processId ?? null;
   }
 
   /**

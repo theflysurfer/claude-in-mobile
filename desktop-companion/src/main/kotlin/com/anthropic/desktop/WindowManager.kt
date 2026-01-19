@@ -109,69 +109,75 @@ class WindowManager {
     private fun getMacWindows(): List<WindowInfo> {
         val windows = mutableListOf<WindowInfo>()
 
-        // OPTIMIZATION: Direct query for java processes only (much faster)
+        // Use CGWindowList API via Swift for reliable Java/Compose window detection
+        // AppleScript/Accessibility API often can't see Java windows, but CoreGraphics can
         try {
-            val javaScript = """
-                tell application "System Events"
-                    set javaWindows to {}
-                    -- Direct query for processes named "java" - MUCH faster than iterating all
-                    try
-                        set javaProcs to (processes whose name is "java")
-                        repeat with proc in javaProcs
-                            try
-                                repeat with win in windows of proc
-                                    try
-                                        if exists (position of win) then
-                                            set winName to name of win
-                                            set winPos to position of win
-                                            set winSize to size of win
-                                            if (item 1 of winSize) > 0 and (item 2 of winSize) > 0 then
-                                                set end of javaWindows to {"java", winName, item 1 of winPos, item 2 of winPos, item 1 of winSize, item 2 of winSize}
-                                            end if
-                                        end if
-                                    end try
-                                end repeat
-                            end try
-                        end repeat
-                    end try
-                    return javaWindows
-                end tell
+            val swiftCode = """
+                import Cocoa
+                let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+                guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { exit(1) }
+                let keywords = ["java", "swarmhost", "compose", "kotlin", "jetbrains", "intellij", "android studio"]
+                for window in windowList {
+                    let ownerName = window["kCGWindowOwnerName"] as? String ?? ""
+                    let windowName = window["kCGWindowName"] as? String ?? ""
+                    let bounds = window["kCGWindowBounds"] as? [String: CGFloat] ?? [:]
+                    let layer = window["kCGWindowLayer"] as? Int ?? 0
+                    let ownerPID = window["kCGWindowOwnerPID"] as? Int ?? 0
+                    guard layer == 0 else { continue }
+                    let ownerLower = ownerName.lowercased()
+                    let isJavaApp = keywords.contains { ownerLower.contains(${'$'}0) }
+                    if isJavaApp && !windowName.isEmpty {
+                        let x = Int(bounds["X"] ?? 0)
+                        let y = Int(bounds["Y"] ?? 0)
+                        let w = Int(bounds["Width"] ?? 0)
+                        let h = Int(bounds["Height"] ?? 0)
+                        guard w > 50 && h > 50 else { continue }
+                        print("\(ownerName)|\(windowName)|\(x)|\(y)|\(w)|\(h)|\(ownerPID)")
+                    }
+                }
             """.trimIndent()
 
-            val javaProcess = ProcessBuilder("osascript", "-e", javaScript)
-                .redirectErrorStream(false)
-                .start()
+            // Write Swift code to temp file and compile/run
+            val tempSwift = java.io.File.createTempFile("windowlist", ".swift")
+            val tempExe = java.io.File(tempSwift.parent, "windowlist_exe")
+            try {
+                tempSwift.writeText(swiftCode)
 
-            // Read streams in separate threads to avoid deadlock
-            val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-                javaProcess.inputStream.bufferedReader().readText()
-            }
-            val stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-                javaProcess.errorStream.bufferedReader().readText()
-            }
+                // Compile Swift code
+                val compileProcess = ProcessBuilder("swiftc", "-O", "-o", tempExe.absolutePath, tempSwift.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+                val compileCompleted = compileProcess.waitFor(APPLESCRIPT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-            val completed = javaProcess.waitFor(APPLESCRIPT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                if (!compileCompleted || compileProcess.exitValue() != 0) {
+                    val error = compileProcess.inputStream.bufferedReader().readText()
+                    System.err.println("Swift compile failed: $error")
+                } else {
+                    // Run the compiled executable
+                    val runProcess = ProcessBuilder(tempExe.absolutePath)
+                        .redirectErrorStream(false)
+                        .start()
 
-            if (!completed) {
-                javaProcess.destroyForcibly()
-                System.err.println("AppleScript Java scan timeout")
-            } else {
-                val javaStdout = stdoutFuture.get(2, TimeUnit.SECONDS)
-                val javaStderr = stderrFuture.get(2, TimeUnit.SECONDS)
-                val javaExitCode = javaProcess.exitValue()
+                    val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                        runProcess.inputStream.bufferedReader().readText()
+                    }
 
-                if (javaExitCode != 0) {
-                    System.err.println("AppleScript Java scan failed (exit $javaExitCode): $javaStderr")
-                } else if (javaStdout.isNotBlank()) {
-                    parseAppleScriptWindowList(javaStdout, windows, "java")
+                    val runCompleted = runProcess.waitFor(5, TimeUnit.SECONDS)
+                    if (runCompleted) {
+                        val output = stdoutFuture.get(2, TimeUnit.SECONDS)
+                        parseCGWindowListOutput(output, windows)
+                    } else {
+                        runProcess.destroyForcibly()
+                        System.err.println("Swift window list timeout")
+                    }
                 }
+            } finally {
+                tempSwift.delete()
+                tempExe.delete()
             }
         } catch (e: Exception) {
-            System.err.println("Error getting Java windows: ${e.message}")
+            System.err.println("Error getting macOS windows via CGWindowList: ${e.message}")
         }
-
-        // NOTE: Skip general window scan - it's too slow and we mainly care about Java/Compose windows
-        // The Java scan above covers our use case (Compose Desktop automation)
 
         // Get actual focused window (with timeout)
         try {
@@ -226,6 +232,46 @@ class WindowManager {
         }
 
         return windows
+    }
+
+    /**
+     * Parse CGWindowList output format: owner|title|x|y|width|height|pid
+     */
+    private fun parseCGWindowListOutput(output: String, windows: MutableList<WindowInfo>) {
+        var index = windows.size
+        val seen = mutableSetOf<String>()
+
+        output.lines().filter { it.isNotBlank() }.forEach { line ->
+            try {
+                val parts = line.split("|")
+                if (parts.size >= 6) {
+                    val ownerName = parts[0]
+                    val windowName = parts[1]
+                    val x = parts[2].toInt()
+                    val y = parts[3].toInt()
+                    val w = parts[4].toInt()
+                    val h = parts[5].toInt()
+                    val pid = parts.getOrNull(6)?.toIntOrNull() ?: 0
+
+                    val key = "${windowName}_${x}_${y}"
+                    if (key !in seen) {
+                        seen.add(key)
+                        windows.add(
+                            WindowInfo(
+                                id = "mac_${index++}",
+                                title = windowName.ifEmpty { ownerName },
+                                bounds = Bounds(x, y, w, h),
+                                focused = false,
+                                ownerName = ownerName,
+                                processId = if (pid > 0) pid else null
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                System.err.println("Failed to parse CGWindowList line: $line - ${e.message}")
+            }
+        }
     }
 
     private fun parseAppleScriptWindowList(output: String, windows: MutableList<WindowInfo>, prefix: String = "mac") {

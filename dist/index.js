@@ -117,6 +117,10 @@ const tools = [
                     type: "number",
                     description: "Tap element by index from get_ui output (Android only)",
                 },
+                targetPid: {
+                    type: "number",
+                    description: "Desktop only: PID of target process. When provided, sends tap without stealing window focus.",
+                },
                 platform: platformParam,
             },
         },
@@ -194,6 +198,10 @@ const tools = [
                     type: "string",
                     description: "Text to type",
                 },
+                targetPid: {
+                    type: "number",
+                    description: "Desktop only: PID of target process. When provided, sends input without stealing window focus.",
+                },
                 platform: platformParam,
             },
             required: ["text"],
@@ -208,6 +216,10 @@ const tools = [
                 key: {
                     type: "string",
                     description: "Key name: BACK, HOME, ENTER, TAB, DELETE, MENU, POWER, VOLUME_UP, VOLUME_DOWN, etc.",
+                },
+                targetPid: {
+                    type: "number",
+                    description: "Desktop only: PID of target process. When provided, sends key without stealing window focus.",
                 },
                 platform: platformParam,
             },
@@ -674,7 +686,8 @@ async function handleTool(name, args) {
             if (x === undefined || y === undefined) {
                 return { text: "Please provide x,y coordinates, text, resourceId, or index" };
             }
-            await deviceManager.tap(x, y, platform);
+            const targetPid = args.targetPid;
+            await deviceManager.tap(x, y, platform, targetPid);
             return { text: `Tapped at (${x}, ${y})` };
         }
         case "long_press": {
@@ -712,11 +725,13 @@ async function handleTool(name, args) {
             return { text: "Please provide direction or x1,y1,x2,y2 coordinates" };
         }
         case "input_text": {
-            await deviceManager.inputText(args.text, platform);
+            const targetPid = args.targetPid;
+            await deviceManager.inputText(args.text, platform, targetPid);
             return { text: `Entered text: "${args.text}"` };
         }
         case "press_key": {
-            await deviceManager.pressKey(args.key, platform);
+            const targetPid = args.targetPid;
+            await deviceManager.pressKey(args.key, platform, targetPid);
             return { text: `Pressed key: ${args.key}` };
         }
         case "find_element": {
@@ -828,7 +843,8 @@ async function handleTool(name, args) {
             let result = "Desktop windows:\n";
             for (const w of windowInfo.windows) {
                 const focused = w.focused ? " [FOCUSED]" : "";
-                result += `  • ${w.id} - ${w.title}${focused} (${w.bounds.width}x${w.bounds.height})\n`;
+                const pid = w.processId ? ` PID:${w.processId}` : "";
+                result += `  • ${w.id} - ${w.title}${focused}${pid} (${w.bounds.width}x${w.bounds.height})\n`;
             }
             return { text: result.trim() };
         }

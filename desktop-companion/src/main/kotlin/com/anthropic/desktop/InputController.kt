@@ -6,11 +6,17 @@ import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
+import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 /**
  * Controls mouse and keyboard input using java.awt.Robot
- * Handles HiDPI coordinate conversion
+ * Handles HiDPI coordinate conversion with multi-monitor support
+ *
+ * Supports two modes:
+ * 1. Normal mode (Robot) - steals focus, works everywhere
+ * 2. Background mode (CGEvent) - macOS only, sends events to specific PID without stealing focus
  */
 class InputController {
     private val robot = Robot().apply {
@@ -18,12 +24,29 @@ class InputController {
         isAutoWaitForIdle = true
     }
 
-    private val scaleFactor: Double = detectScaleFactor()
+    private val defaultScaleFactor: Double = detectDefaultScaleFactor()
+    private val isMac = System.getProperty("os.name").lowercase().contains("mac")
+
+    // Cached compiled CGEvent helper
+    private var cgEventHelperPath: String? = null
+    private val cgEventHelperLock = Any()
+
+    // Cache for monitor info
+    private data class MonitorBounds(
+        val x: Int,
+        val y: Int,
+        val width: Int,
+        val height: Int,
+        val scaleFactor: Double
+    )
+    private var cachedMonitors: List<MonitorBounds>? = null
+    private var monitorCacheTime: Long = 0
+    private val MONITOR_CACHE_TTL_MS = 10000L // 10 seconds
 
     /**
-     * Detect HiDPI scale factor
+     * Detect default HiDPI scale factor (from primary monitor)
      */
-    private fun detectScaleFactor(): Double {
+    private fun detectDefaultScaleFactor(): Double {
         return try {
             val ge = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
             val device = ge.defaultScreenDevice
@@ -35,14 +58,71 @@ class InputController {
     }
 
     /**
-     * Get the current scale factor
+     * Get all monitors with their bounds and scale factors
      */
-    fun getScaleFactor(): Double = scaleFactor
+    private fun getMonitors(): List<MonitorBounds> {
+        val now = System.currentTimeMillis()
+        cachedMonitors?.let { cached ->
+            if (now - monitorCacheTime < MONITOR_CACHE_TTL_MS) {
+                return cached
+            }
+        }
+
+        val ge = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+        val monitors = ge.screenDevices.map { device ->
+            val bounds = device.defaultConfiguration.bounds
+            val scale = device.defaultConfiguration.defaultTransform.scaleX
+            MonitorBounds(
+                x = bounds.x,
+                y = bounds.y,
+                width = bounds.width,
+                height = bounds.height,
+                scaleFactor = scale
+            )
+        }
+
+        cachedMonitors = monitors
+        monitorCacheTime = now
+        return monitors
+    }
 
     /**
-     * Convert logical coordinates to physical
+     * Find the scale factor for a specific coordinate
+     * Returns the scale factor of the monitor containing the coordinate
+     */
+    private fun getScaleFactorForCoordinate(x: Int, y: Int): Double {
+        val monitors = getMonitors()
+
+        // Find the monitor containing this coordinate
+        // Note: x,y here are logical coordinates
+        for (monitor in monitors) {
+            // For multi-monitor, coordinates are in the combined virtual screen space
+            // Each monitor's bounds are in physical pixels
+            val logicalX = (monitor.x / monitor.scaleFactor).toInt()
+            val logicalY = (monitor.y / monitor.scaleFactor).toInt()
+            val logicalWidth = (monitor.width / monitor.scaleFactor).toInt()
+            val logicalHeight = (monitor.height / monitor.scaleFactor).toInt()
+
+            if (x >= logicalX && x < logicalX + logicalWidth &&
+                y >= logicalY && y < logicalY + logicalHeight) {
+                return monitor.scaleFactor
+            }
+        }
+
+        // Default to primary monitor's scale factor if coordinate not found
+        return defaultScaleFactor
+    }
+
+    /**
+     * Get the current scale factor (default/primary monitor)
+     */
+    fun getScaleFactor(): Double = defaultScaleFactor
+
+    /**
+     * Convert logical coordinates to physical, accounting for multi-monitor scale factors
      */
     private fun toPhysical(x: Int, y: Int): Pair<Int, Int> {
+        val scaleFactor = getScaleFactorForCoordinate(x, y)
         return Pair(
             (x * scaleFactor).toInt(),
             (y * scaleFactor).toInt()
@@ -50,9 +130,27 @@ class InputController {
     }
 
     /**
+     * Convert logical coordinates to physical using a specific scale factor
+     * Use this when you know the exact monitor
+     */
+    private fun toPhysicalWithScale(x: Int, y: Int, scale: Double): Pair<Int, Int> {
+        return Pair(
+            (x * scale).toInt(),
+            (y * scale).toInt()
+        )
+    }
+
+    /**
      * Tap at logical coordinates
+     * On macOS, uses cliclick if available for better multi-monitor support
      */
     fun tap(x: Int, y: Int) {
+        // Try cliclick first on macOS - it handles multi-monitor better
+        if (isMac && tryCliClick(x, y)) {
+            return
+        }
+
+        // Fallback to Robot
         val (px, py) = toPhysical(x, y)
         robot.mouseMove(px, py)
         robot.mousePress(InputEvent.BUTTON1_DOWN_MASK)
@@ -60,9 +158,43 @@ class InputController {
     }
 
     /**
+     * Try to use cliclick for clicking (macOS only)
+     * Returns true if successful, false if cliclick not available
+     */
+    private fun tryCliClick(x: Int, y: Int): Boolean {
+        return try {
+            val process = ProcessBuilder("cliclick", "c:$x,$y")
+                .redirectErrorStream(true)
+                .start()
+
+            val success = process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0
+            if (!success) {
+                System.err.println("cliclick failed or not found, falling back to Robot")
+            }
+            success
+        } catch (e: Exception) {
+            // cliclick not installed
+            false
+        }
+    }
+
+    /**
      * Double tap at coordinates
      */
     fun doubleTap(x: Int, y: Int) {
+        // Try cliclick for double-click on macOS
+        if (isMac) {
+            try {
+                val process = ProcessBuilder("cliclick", "dc:$x,$y")
+                    .redirectErrorStream(true)
+                    .start()
+                if (process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0) {
+                    return
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Fallback to two taps
         tap(x, y)
         Thread.sleep(50)
         tap(x, y)
@@ -83,6 +215,19 @@ class InputController {
      * Right click at coordinates
      */
     fun rightClick(x: Int, y: Int) {
+        // Try cliclick for right-click on macOS
+        if (isMac) {
+            try {
+                val process = ProcessBuilder("cliclick", "rc:$x,$y")
+                    .redirectErrorStream(true)
+                    .start()
+                if (process.waitFor(5, TimeUnit.SECONDS) && process.exitValue() == 0) {
+                    return
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Fallback to Robot
         val (px, py) = toPhysical(x, y)
         robot.mouseMove(px, py)
         robot.mousePress(InputEvent.BUTTON3_DOWN_MASK)
@@ -119,8 +264,8 @@ class InputController {
      */
     fun swipeDirection(direction: String, distance: Int = 400) {
         val screenSize = Toolkit.getDefaultToolkit().screenSize
-        val centerX = (screenSize.width / scaleFactor / 2).toInt()
-        val centerY = (screenSize.height / scaleFactor / 2).toInt()
+        val centerX = (screenSize.width / defaultScaleFactor / 2).toInt()
+        val centerY = (screenSize.height / defaultScaleFactor / 2).toInt()
 
         val (x1, y1, x2, y2) = when (direction.lowercase()) {
             "up" -> listOf(centerX, centerY + distance / 2, centerX, centerY - distance / 2)
@@ -372,6 +517,185 @@ class InputController {
             "alt", "option" -> KeyEvent.VK_ALT
             "meta", "cmd", "command", "win", "windows" -> KeyEvent.VK_META
             else -> throw IllegalArgumentException("Unknown modifier: $modifier")
+        }
+    }
+
+    // ============ CGEvent-based input (macOS, no focus stealing) ============
+
+    /**
+     * Get or compile the CGEvent helper
+     */
+    private fun getCGEventHelper(): String? {
+        if (!isMac) return null
+
+        synchronized(cgEventHelperLock) {
+            cgEventHelperPath?.let { if (File(it).exists()) return it }
+
+            try {
+                // Write Swift source to temp file
+                val swiftSource = javaClass.getResourceAsStream("/cgevent_helper.swift")
+                    ?.bufferedReader()?.readText()
+                    ?: return null
+
+                val tempSwift = File.createTempFile("cgevent_helper", ".swift")
+                val tempExe = File(tempSwift.parent, "cgevent_helper_exe")
+
+                tempSwift.writeText(swiftSource)
+
+                // Compile Swift
+                val compileProcess = ProcessBuilder("swiftc", "-O", "-o", tempExe.absolutePath, tempSwift.absolutePath)
+                    .redirectErrorStream(true)
+                    .start()
+
+                val compileOutput = compileProcess.inputStream.bufferedReader().readText()
+                val compileOk = compileProcess.waitFor(30, TimeUnit.SECONDS) && compileProcess.exitValue() == 0
+
+                tempSwift.delete()
+
+                if (!compileOk) {
+                    System.err.println("CGEvent helper compile failed: $compileOutput")
+                    return null
+                }
+
+                cgEventHelperPath = tempExe.absolutePath
+                return cgEventHelperPath
+            } catch (e: Exception) {
+                System.err.println("CGEvent helper setup failed: ${e.message}")
+                return null
+            }
+        }
+    }
+
+    /**
+     * Run CGEvent helper command
+     */
+    private fun runCGEventHelper(vararg args: String): Boolean {
+        val helper = getCGEventHelper() ?: return false
+
+        return try {
+            val process = ProcessBuilder(helper, *args)
+                .redirectErrorStream(true)
+                .start()
+
+            val output = process.inputStream.bufferedReader().readText()
+            val success = process.waitFor(10, TimeUnit.SECONDS) && process.exitValue() == 0
+
+            if (!success && output.isNotBlank()) {
+                System.err.println("CGEvent helper error: $output")
+            }
+
+            success
+        } catch (e: Exception) {
+            System.err.println("CGEvent helper execution failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Type text to specific process (no focus stealing)
+     * Falls back to Robot if CGEvent fails
+     */
+    fun typeTextToPid(text: String, pid: Int): Boolean {
+        if (!isMac || pid <= 0) {
+            typeTextDirect(text)
+            return true
+        }
+
+        return runCGEventHelper("type", pid.toString(), text)
+    }
+
+    /**
+     * Tap at coordinates for specific process (no focus stealing)
+     * Falls back to Robot if CGEvent fails
+     */
+    fun tapToPid(x: Int, y: Int, pid: Int): Boolean {
+        if (!isMac || pid <= 0) {
+            tap(x, y)
+            return true
+        }
+
+        // CGEvent uses screen coordinates, need to convert from logical
+        val (px, py) = toPhysical(x, y)
+        return runCGEventHelper("click", pid.toString(), px.toString(), py.toString())
+    }
+
+    /**
+     * Send key event to specific process (no focus stealing)
+     */
+    fun keyEventToPid(key: String, pid: Int, modifiers: List<String>? = null): Boolean {
+        if (!isMac || pid <= 0) {
+            keyEvent(key, modifiers)
+            return true
+        }
+
+        val keyCode = mapKeyCodeToCGKeyCode(key)
+        val modsStr = modifiers?.joinToString(",") ?: ""
+
+        return if (modsStr.isNotEmpty()) {
+            runCGEventHelper("key", pid.toString(), keyCode.toString(), modsStr)
+        } else {
+            runCGEventHelper("key", pid.toString(), keyCode.toString())
+        }
+    }
+
+    /**
+     * Map key name to CGKeyCode (macOS virtual key codes)
+     */
+    private fun mapKeyCodeToCGKeyCode(key: String): Int {
+        return when (key.uppercase()) {
+            "ENTER", "RETURN" -> 36
+            "TAB" -> 48
+            "SPACE" -> 49
+            "BACKSPACE", "BACK_SPACE" -> 51
+            "DELETE", "DEL" -> 117
+            "ESCAPE", "ESC" -> 53
+            "HOME" -> 115
+            "END" -> 119
+            "PAGE_UP", "PAGEUP" -> 116
+            "PAGE_DOWN", "PAGEDOWN" -> 121
+            "UP", "ARROW_UP" -> 126
+            "DOWN", "ARROW_DOWN" -> 125
+            "LEFT", "ARROW_LEFT" -> 123
+            "RIGHT", "ARROW_RIGHT" -> 124
+            "F1" -> 122
+            "F2" -> 120
+            "F3" -> 99
+            "F4" -> 118
+            "F5" -> 96
+            "F6" -> 97
+            "F7" -> 98
+            "F8" -> 100
+            "F9" -> 101
+            "F10" -> 109
+            "F11" -> 103
+            "F12" -> 111
+            else -> {
+                // For single characters, map to macOS key codes
+                if (key.length == 1) {
+                    charToCGKeyCode(key[0])
+                } else {
+                    throw IllegalArgumentException("Unknown key: $key")
+                }
+            }
+        }
+    }
+
+    /**
+     * Map character to macOS CGKeyCode
+     */
+    private fun charToCGKeyCode(char: Char): Int {
+        return when (char.lowercaseChar()) {
+            'a' -> 0; 'b' -> 11; 'c' -> 8; 'd' -> 2; 'e' -> 14; 'f' -> 3
+            'g' -> 5; 'h' -> 4; 'i' -> 34; 'j' -> 38; 'k' -> 40; 'l' -> 37
+            'm' -> 46; 'n' -> 45; 'o' -> 31; 'p' -> 35; 'q' -> 12; 'r' -> 15
+            's' -> 1; 't' -> 17; 'u' -> 32; 'v' -> 9; 'w' -> 13; 'x' -> 7
+            'y' -> 16; 'z' -> 6
+            '1' -> 18; '2' -> 19; '3' -> 20; '4' -> 21; '5' -> 23
+            '6' -> 22; '7' -> 26; '8' -> 28; '9' -> 25; '0' -> 29
+            '-' -> 27; '=' -> 24; '[' -> 33; ']' -> 30; '\\' -> 42
+            ';' -> 41; '\'' -> 39; ',' -> 43; '.' -> 47; '/' -> 44
+            '`' -> 50; ' ' -> 49
+            else -> 49 // Default to space
         }
     }
 }
