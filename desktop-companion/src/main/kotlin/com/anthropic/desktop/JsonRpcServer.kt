@@ -117,9 +117,10 @@ class JsonRpcServer(
 
             try {
                 val request = json.decodeFromString<JsonRpcRequest>(line)
-                // Launch request processing in separate coroutine
-                // This prevents slow handlers (like AppleScript) from blocking stdin read
-                launch {
+                // Launch request processing in a SEPARATE THREAD (Dispatchers.IO)
+                // This is critical because runBlocking uses a single thread and
+                // readLine() blocks it, preventing coroutines from executing
+                launch(Dispatchers.IO) {
                     try {
                         processRequest(request)
                     } catch (e: Exception) {

@@ -7,6 +7,7 @@ import com.sun.jna.platform.win32.User32
 import com.sun.jna.platform.win32.WinDef
 import com.sun.jna.platform.win32.WinUser
 import java.awt.Rectangle
+import java.util.concurrent.TimeUnit
 
 /**
  * Cross-platform window management
@@ -22,6 +23,10 @@ class WindowManager {
     @Volatile
     private var cacheTimestamp: Long = 0
     private val CACHE_TTL_MS = 1000L // 1 second cache
+
+    companion object {
+        private const val APPLESCRIPT_TIMEOUT_SECONDS = 10L
+    }
 
     /**
      * Get list of all visible windows (with caching)
@@ -104,66 +109,15 @@ class WindowManager {
     private fun getMacWindows(): List<WindowInfo> {
         val windows = mutableListOf<WindowInfo>()
 
-        try {
-            // Use AppleScript to get window list from ALL processes (not just visible ones)
-            // This catches windows on secondary monitors and background processes
-            // The key fix: removed "visible is true" filter to catch all windows
-            val script = """
-                tell application "System Events"
-                    set windowList to {}
-                    -- Get ALL processes (removed "visible is true" to catch windows on all monitors)
-                    repeat with proc in processes
-                        set procName to name of proc
-                        try
-                            -- Check if process has any windows
-                            if (count of windows of proc) > 0 then
-                                repeat with win in windows of proc
-                                    try
-                                        -- Check if window has valid position (is on screen, not minimized)
-                                        if exists (position of win) then
-                                            set winName to name of win
-                                            set winPos to position of win
-                                            set winSize to size of win
-                                            -- Only add windows with valid size (width/height > 0)
-                                            if (item 1 of winSize) > 0 and (item 2 of winSize) > 0 then
-                                                set end of windowList to {procName, winName, item 1 of winPos, item 2 of winPos, item 1 of winSize, item 2 of winSize}
-                                            end if
-                                        end if
-                                    end try
-                                end repeat
-                            end if
-                        end try
-                    end repeat
-                    return windowList
-                end tell
-            """.trimIndent()
-
-            val process = ProcessBuilder("osascript", "-e", script).start()
-            val stdout = process.inputStream.bufferedReader().readText()
-            val stderr = process.errorStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
-
-            if (exitCode != 0) {
-                System.err.println("AppleScript main scan failed (exit $exitCode): $stderr")
-            } else if (stdout.isNotBlank()) {
-                // Parse AppleScript output
-                // Format: {{procName, winName, x, y, w, h}, ...}
-                parseAppleScriptWindowList(stdout, windows)
-            }
-        } catch (e: Exception) {
-            System.err.println("Error getting macOS windows: ${e.message}")
-        }
-
-        // Additionally scan for Java/JVM/Compose processes specifically
-        // These may have special process names that aren't caught in the general scan
+        // OPTIMIZATION: Direct query for java processes only (much faster)
         try {
             val javaScript = """
                 tell application "System Events"
                     set javaWindows to {}
-                    repeat with proc in processes
-                        set procName to name of proc
-                        -- Expanded list to catch more Java/Compose apps
-                        if procName contains "java" or procName contains "kotlin" or procName contains "JetBrains" or procName contains "gradle" or procName contains "idea" or procName contains "Compose" or procName contains "Desktop" then
+                    -- Direct query for processes named "java" - MUCH faster than iterating all
+                    try
+                        set javaProcs to (processes whose name is "java")
+                        repeat with proc in javaProcs
                             try
                                 repeat with win in windows of proc
                                     try
@@ -172,45 +126,54 @@ class WindowManager {
                                             set winPos to position of win
                                             set winSize to size of win
                                             if (item 1 of winSize) > 0 and (item 2 of winSize) > 0 then
-                                                set end of javaWindows to {procName, winName, item 1 of winPos, item 2 of winPos, item 1 of winSize, item 2 of winSize}
+                                                set end of javaWindows to {"java", winName, item 1 of winPos, item 2 of winPos, item 1 of winSize, item 2 of winSize}
                                             end if
                                         end if
                                     end try
                                 end repeat
                             end try
-                        end if
-                    end repeat
+                        end repeat
+                    end try
                     return javaWindows
                 end tell
             """.trimIndent()
 
-            val javaProcess = ProcessBuilder("osascript", "-e", javaScript).start()
-            val javaStdout = javaProcess.inputStream.bufferedReader().readText()
-            val javaStderr = javaProcess.errorStream.bufferedReader().readText()
-            val javaExitCode = javaProcess.waitFor()
+            val javaProcess = ProcessBuilder("osascript", "-e", javaScript)
+                .redirectErrorStream(false)
+                .start()
 
-            if (javaExitCode != 0) {
-                System.err.println("AppleScript Java scan failed (exit $javaExitCode): $javaStderr")
+            // Read streams in separate threads to avoid deadlock
+            val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                javaProcess.inputStream.bufferedReader().readText()
+            }
+            val stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                javaProcess.errorStream.bufferedReader().readText()
             }
 
-            // Parse and add Java windows (avoid duplicates by checking title + bounds)
-            val existingKeys = windows.map { "${it.title}_${it.bounds.x}_${it.bounds.y}" }.toSet()
-            val javaWindows = mutableListOf<WindowInfo>()
-            if (javaStdout.isNotBlank()) {
-                parseAppleScriptWindowList(javaStdout, javaWindows)
-            }
+            val completed = javaProcess.waitFor(APPLESCRIPT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
-            javaWindows.forEach { win ->
-                val key = "${win.title}_${win.bounds.x}_${win.bounds.y}"
-                if (key !in existingKeys) {
-                    windows.add(win.copy(id = "mac_java_${windows.size}"))
+            if (!completed) {
+                javaProcess.destroyForcibly()
+                System.err.println("AppleScript Java scan timeout")
+            } else {
+                val javaStdout = stdoutFuture.get(2, TimeUnit.SECONDS)
+                val javaStderr = stderrFuture.get(2, TimeUnit.SECONDS)
+                val javaExitCode = javaProcess.exitValue()
+
+                if (javaExitCode != 0) {
+                    System.err.println("AppleScript Java scan failed (exit $javaExitCode): $javaStderr")
+                } else if (javaStdout.isNotBlank()) {
+                    parseAppleScriptWindowList(javaStdout, windows, "java")
                 }
             }
         } catch (e: Exception) {
             System.err.println("Error getting Java windows: ${e.message}")
         }
 
-        // Get actual focused window
+        // NOTE: Skip general window scan - it's too slow and we mainly care about Java/Compose windows
+        // The Java scan above covers our use case (Compose Desktop automation)
+
+        // Get actual focused window (with timeout)
         try {
             val focusScript = """
                 tell application "System Events"
@@ -219,48 +182,135 @@ class WindowManager {
                 end tell
             """.trimIndent()
 
-            val focusProcess = ProcessBuilder("osascript", "-e", focusScript).start()
-            val focusedApp = focusProcess.inputStream.bufferedReader().readText().trim()
-            val focusStderr = focusProcess.errorStream.bufferedReader().readText()
-            val focusExitCode = focusProcess.waitFor()
+            val focusProcess = ProcessBuilder("osascript", "-e", focusScript)
+                .redirectErrorStream(false)
+                .start()
 
-            if (focusExitCode != 0) {
-                System.err.println("AppleScript focus check failed: $focusStderr")
+            // Read streams in separate threads
+            val focusStdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                focusProcess.inputStream.bufferedReader().readText()
+            }
+            val focusStderrFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                focusProcess.errorStream.bufferedReader().readText()
             }
 
-            // Mark the focused app's first window as focused
-            val focusedIndex = windows.indexOfFirst { it.ownerName == focusedApp }
-            if (focusedIndex >= 0) {
-                windows[focusedIndex] = windows[focusedIndex].copy(focused = true)
-            } else if (windows.isNotEmpty()) {
-                windows[0] = windows[0].copy(focused = true)
+            val focusCompleted = focusProcess.waitFor(5, TimeUnit.SECONDS)
+
+            if (!focusCompleted) {
+                focusProcess.destroyForcibly()
+                System.err.println("AppleScript focus check timeout")
+            } else {
+                val focusedApp = focusStdoutFuture.get(2, TimeUnit.SECONDS).trim()
+                val focusStderr = focusStderrFuture.get(2, TimeUnit.SECONDS)
+                val focusExitCode = focusProcess.exitValue()
+
+                if (focusExitCode != 0) {
+                    System.err.println("AppleScript focus check failed: $focusStderr")
+                }
+
+                // Mark the focused app's first window as focused
+                val focusedIndex = windows.indexOfFirst { it.ownerName == focusedApp }
+                if (focusedIndex >= 0) {
+                    windows[focusedIndex] = windows[focusedIndex].copy(focused = true)
+                } else if (windows.isNotEmpty()) {
+                    windows[0] = windows[0].copy(focused = true)
+                }
             }
         } catch (e: Exception) {
-            // Fallback: mark first window as focused
-            if (windows.isNotEmpty()) {
-                windows[0] = windows[0].copy(focused = true)
-            }
+            System.err.println("Error getting focused window: ${e.message}")
+        }
+
+        // If no window marked as focused, mark first one
+        if (windows.isNotEmpty() && windows.none { it.focused }) {
+            windows[0] = windows[0].copy(focused = true)
         }
 
         return windows
     }
 
-    private fun parseAppleScriptWindowList(output: String, windows: MutableList<WindowInfo>) {
-        // Simple parsing of AppleScript list output
-        var index = 0
-        val pattern = Regex("""\{([^,]+),\s*([^,]*),\s*(-?\d+),\s*(-?\d+),\s*(\d+),\s*(\d+)\}""")
+    private fun parseAppleScriptWindowList(output: String, windows: MutableList<WindowInfo>, prefix: String = "mac") {
+        // Parse AppleScript list output - handles multiple formats:
+        // 1. Braced items: "{{java, Win1, 75, 84, 100, 100}, {java, Win2, 200, 100, 200, 200}}"
+        // 2. Flat list: "java, LangChain Kotlin Agent, 75, 84, 2857, 1522, java, Win2, 100, 100, 200, 200"
+        // 3. Single item: "java, LangChain Kotlin Agent, 75, 84, 2857, 1522"
+        var index = windows.size
+        val seen = mutableSetOf<String>() // Track seen windows to avoid duplicates
 
-        pattern.findAll(output).forEach { match ->
-            val (procName, winName, x, y, w, h) = match.destructured
+        // First try braced pattern
+        val bracedPattern = Regex("""\{([^{},]+),\s*([^{},]*),\s*(-?\d+),\s*(-?\d+),\s*(\d+),\s*(\d+)\}""")
+        val bracedMatches = bracedPattern.findAll(output).toList()
+
+        if (bracedMatches.isNotEmpty()) {
+            bracedMatches.forEach { match ->
+                val (procName, winName, x, y, w, h) = match.destructured
+                val key = "${winName}_${x}_${y}"
+                if (key !in seen) {
+                    seen.add(key)
+                    windows.add(
+                        WindowInfo(
+                            id = "${prefix}_${index++}",
+                            title = winName.trim().ifEmpty { procName.trim() },
+                            bounds = Bounds(x.toInt(), y.toInt(), w.toInt(), h.toInt()),
+                            focused = false,
+                            ownerName = procName.trim()
+                        )
+                    )
+                }
+            }
+            return
+        }
+
+        // Flat list: split by comma and group into chunks of 6
+        // Format: procName, winName, x, y, w, h, procName2, winName2, x2, y2, w2, h2, ...
+        val parts = output.trim().split(",").map { it.trim() }
+
+        if (parts.size >= 6 && parts.size % 6 == 0) {
+            for (i in parts.indices step 6) {
+                try {
+                    val procName = parts[i]
+                    val winName = parts[i + 1]
+                    val x = parts[i + 2].toInt()
+                    val y = parts[i + 3].toInt()
+                    val w = parts[i + 4].toInt()
+                    val h = parts[i + 5].toInt()
+
+                    val key = "${winName}_${x}_${y}"
+                    if (key !in seen) {
+                        seen.add(key)
+                        windows.add(
+                            WindowInfo(
+                                id = "${prefix}_${index++}",
+                                title = winName.ifEmpty { procName },
+                                bounds = Bounds(x, y, w, h),
+                                focused = false,
+                                ownerName = procName
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    System.err.println("Failed to parse window chunk at index $i: ${e.message}")
+                }
+            }
+            return
+        }
+
+        // Fallback: try single pattern
+        val singlePattern = Regex("""^([^,]+),\s*([^,]*),\s*(-?\d+),\s*(-?\d+),\s*(\d+),\s*(\d+)$""")
+        val singleMatch = singlePattern.find(output.trim())
+
+        if (singleMatch != null) {
+            val (procName, winName, x, y, w, h) = singleMatch.destructured
             windows.add(
                 WindowInfo(
-                    id = "mac_${index++}",
+                    id = "${prefix}_${index++}",
                     title = winName.trim().ifEmpty { procName.trim() },
                     bounds = Bounds(x.toInt(), y.toInt(), w.toInt(), h.toInt()),
                     focused = false,
                     ownerName = procName.trim()
                 )
             )
+        } else if (output.isNotBlank()) {
+            System.err.println("Failed to parse AppleScript output (parts=${parts.size}): $output")
         }
     }
 
