@@ -161,3 +161,13 @@ data class ScaleFactorResult(
 data class MonitorsResult(
     val monitors: List<MonitorInfo>
 )
+
+/**
+ * Tap by text result (for AXUIElement-based clicking on macOS)
+ */
+@Serializable
+data class TapByTextResult(
+    val success: Boolean,
+    val elementRole: String? = null,
+    val error: String? = null
+)

@@ -2,7 +2,7 @@
  * Desktop Client - communicates with Kotlin companion app via JSON-RPC
  */
 import { EventEmitter } from "events";
-import type { LaunchOptions, ScreenshotOptions, ScreenshotResult, UiHierarchy, WindowInfo, LogEntry, LogOptions, PerformanceMetrics, DesktopState, PermissionStatus, MonitorInfo } from "./types.js";
+import type { LaunchOptions, ScreenshotOptions, ScreenshotResult, UiHierarchy, WindowInfo, LogEntry, LogOptions, PerformanceMetrics, DesktopState, PermissionStatus, MonitorInfo, TapByTextResult } from "./types.js";
 export declare class DesktopClient extends EventEmitter {
     private process;
     private gradleLauncher;
@@ -75,6 +75,14 @@ export declare class DesktopClient extends EventEmitter {
      * @param targetPid - Optional PID to send click without stealing focus (macOS only)
      */
     tap(x: number, y: number, targetPid?: number): Promise<void>;
+    /**
+     * Tap an element by its text content using Accessibility API
+     * This does NOT move the cursor - perfect for background automation (macOS only)
+     * @param text - The text to search for (partial match, case-insensitive)
+     * @param pid - The process ID of the target application
+     * @param exactMatch - If true, requires exact text match
+     */
+    tapByText(text: string, pid: number, exactMatch?: boolean): Promise<TapByTextResult>;
     /**
      * Long press at coordinates
      */

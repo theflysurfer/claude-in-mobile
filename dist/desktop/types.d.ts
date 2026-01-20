@@ -141,4 +141,9 @@ export interface MonitorInfo {
 export interface MonitorsResult {
     monitors: MonitorInfo[];
 }
+export interface TapByTextResult {
+    success: boolean;
+    elementRole?: string;
+    error?: string;
+}
 //# sourceMappingURL=types.d.ts.map

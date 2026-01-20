@@ -53,6 +53,20 @@ fun main() = runBlocking {
         }
     }
 
+    // Tap by text - uses Accessibility API to click without moving cursor (macOS only)
+    server.registerTypedHandler("tap_by_text") { params ->
+        val text = params.stringOrThrow("text")
+        val pid = params.intOrThrow("pid")
+        val exactMatch = params.boolean("exactMatch") ?: false
+
+        val result = inputController.tapByText(text, pid, exactMatch)
+        TapByTextResult(
+            success = result.success,
+            elementRole = result.elementRole,
+            error = result.error
+        )
+    }
+
     // Double tap
     server.registerVoidHandler("double_tap") { params ->
         val x = params.intOrThrow("x")

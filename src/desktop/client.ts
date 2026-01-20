@@ -29,6 +29,7 @@ import type {
   PermissionStatus,
   MonitorInfo,
   MonitorsResult,
+  TapByTextResult,
 } from "./types.js";
 
 const MAX_RESTARTS = 3;
@@ -417,6 +418,17 @@ export class DesktopClient extends EventEmitter {
    */
   async tap(x: number, y: number, targetPid?: number): Promise<void> {
     await this.sendRequest("tap", { x, y, targetPid });
+  }
+
+  /**
+   * Tap an element by its text content using Accessibility API
+   * This does NOT move the cursor - perfect for background automation (macOS only)
+   * @param text - The text to search for (partial match, case-insensitive)
+   * @param pid - The process ID of the target application
+   * @param exactMatch - If true, requires exact text match
+   */
+  async tapByText(text: string, pid: number, exactMatch: boolean = false): Promise<TapByTextResult> {
+    return this.sendRequest<TapByTextResult>("tap_by_text", { text, pid, exactMatch });
   }
 
   /**

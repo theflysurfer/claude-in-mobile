@@ -31,6 +31,10 @@ class InputController {
     private var cgEventHelperPath: String? = null
     private val cgEventHelperLock = Any()
 
+    // Cached compiled AXClick helper (for cursor-free clicks)
+    private var axClickHelperPath: String? = null
+    private val axClickHelperLock = Any()
+
     // Cache for monitor info
     private data class MonitorBounds(
         val x: Int,
@@ -696,6 +700,122 @@ class InputController {
             ';' -> 41; '\'' -> 39; ',' -> 43; '.' -> 47; '/' -> 44
             '`' -> 50; ' ' -> 49
             else -> 49 // Default to space
+        }
+    }
+
+    // ============ AXUIElement-based input (macOS, no cursor movement) ============
+
+    /**
+     * Get or compile the AXClick helper
+     */
+    private fun getAXClickHelper(): String? {
+        if (!isMac) return null
+
+        synchronized(axClickHelperLock) {
+            axClickHelperPath?.let { if (File(it).exists()) return it }
+
+            try {
+                // Write Swift source to temp file
+                val swiftSource = javaClass.getResourceAsStream("/ax_click.swift")
+                    ?.bufferedReader()?.readText()
+                    ?: return null
+
+                val tempDir = File(System.getProperty("java.io.tmpdir"), "claude-desktop")
+                tempDir.mkdirs()
+
+                val tempSwift = File(tempDir, "ax_click.swift")
+                val tempExe = File(tempDir, "ax_click")
+
+                // Only recompile if source changed or exe missing
+                if (!tempExe.exists() || tempSwift.exists() && tempSwift.readText() != swiftSource) {
+                    tempSwift.writeText(swiftSource)
+
+                    System.err.println("Compiling AXClick helper...")
+                    val compileProcess = ProcessBuilder("swiftc", "-O", "-o", tempExe.absolutePath, tempSwift.absolutePath)
+                        .redirectErrorStream(true)
+                        .start()
+
+                    val compileOutput = compileProcess.inputStream.bufferedReader().readText()
+                    val compileOk = compileProcess.waitFor(60, TimeUnit.SECONDS) && compileProcess.exitValue() == 0
+
+                    if (!compileOk) {
+                        System.err.println("AXClick helper compile failed: $compileOutput")
+                        return null
+                    }
+
+                    System.err.println("AXClick helper compiled successfully")
+                }
+
+                axClickHelperPath = tempExe.absolutePath
+                return axClickHelperPath
+            } catch (e: Exception) {
+                System.err.println("AXClick helper setup failed: ${e.message}")
+                return null
+            }
+        }
+    }
+
+    /**
+     * Result of tapByText operation
+     */
+    data class TapByTextResult(
+        val success: Boolean,
+        val elementRole: String? = null,
+        val error: String? = null
+    )
+
+    /**
+     * Tap an element by its text content using Accessibility API
+     * This does NOT move the cursor - perfect for background automation
+     *
+     * @param text The text to search for (partial match, case-insensitive)
+     * @param pid The process ID of the target application
+     * @param exactMatch If true, requires exact text match
+     * @return TapByTextResult with success status and details
+     */
+    fun tapByText(text: String, pid: Int, exactMatch: Boolean = false): TapByTextResult {
+        if (!isMac) {
+            return TapByTextResult(false, error = "tapByText is only supported on macOS")
+        }
+
+        val helper = getAXClickHelper()
+            ?: return TapByTextResult(false, error = "Failed to compile AXClick helper")
+
+        return try {
+            val args = mutableListOf(helper, pid.toString(), text)
+            if (exactMatch) {
+                args.add("--exact")
+            }
+
+            val process = ProcessBuilder(args)
+                .redirectErrorStream(false)
+                .start()
+
+            val stdout = process.inputStream.bufferedReader().readText().trim()
+            val stderr = process.errorStream.bufferedReader().readText().trim()
+            val completed = process.waitFor(10, TimeUnit.SECONDS)
+
+            if (!completed) {
+                process.destroyForcibly()
+                return TapByTextResult(false, error = "Timeout waiting for AXClick")
+            }
+
+            val exitCode = process.exitValue()
+
+            when (exitCode) {
+                0 -> {
+                    // Parse output like "OK:pressed:AXStaticText"
+                    val role = stdout.substringAfterLast(":", "unknown")
+                    TapByTextResult(true, elementRole = role)
+                }
+                2 -> TapByTextResult(false, error = "Cannot access app. Check accessibility permissions.")
+                3 -> TapByTextResult(false, error = "No windows found for PID $pid")
+                4 -> TapByTextResult(false, error = "Found element but press action failed")
+                5 -> TapByTextResult(false, error = "Element with text '$text' not found")
+                else -> TapByTextResult(false, error = stderr.ifEmpty { "Unknown error (exit code $exitCode)" })
+            }
+        } catch (e: Exception) {
+            TapByTextResult(false, error = "Exception: ${e.message}")
         }
     }
 }

@@ -180,3 +180,10 @@ export interface MonitorInfo {
 export interface MonitorsResult {
   monitors: MonitorInfo[];
 }
+
+// Tap by text result (AXUIElement-based clicking, macOS only)
+export interface TapByTextResult {
+  success: boolean;
+  elementRole?: string;
+  error?: string;
+}

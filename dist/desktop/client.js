@@ -340,6 +340,16 @@ export class DesktopClient extends EventEmitter {
         await this.sendRequest("tap", { x, y, targetPid });
     }
     /**
+     * Tap an element by its text content using Accessibility API
+     * This does NOT move the cursor - perfect for background automation (macOS only)
+     * @param text - The text to search for (partial match, case-insensitive)
+     * @param pid - The process ID of the target application
+     * @param exactMatch - If true, requires exact text match
+     */
+    async tapByText(text, pid, exactMatch = false) {
+        return this.sendRequest("tap_by_text", { text, pid, exactMatch });
+    }
+    /**
      * Long press at coordinates
      */
     async longPress(x, y, durationMs = 1000) {

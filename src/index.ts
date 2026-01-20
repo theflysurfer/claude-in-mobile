@@ -9,6 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { DeviceManager, Platform } from "./device-manager.js";
+import { desktopClient } from "./desktop/client.js";
 import {
   parseUiHierarchy,
   findByText,
@@ -585,6 +586,29 @@ const tools: Tool[] = [
       required: ["description"],
     },
   },
+  {
+    name: "tap_by_text",
+    description: "Tap an element by its text content using Accessibility API. Does NOT move cursor - perfect for background automation. (Desktop/macOS only)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          description: "Text to search for (partial match, case-insensitive)",
+        },
+        pid: {
+          type: "number",
+          description: "Process ID of the target application. Get from get_window_info.",
+        },
+        exactMatch: {
+          type: "boolean",
+          description: "If true, requires exact text match (default: false)",
+          default: false,
+        },
+      },
+      required: ["text", "pid"],
+    },
+  },
 ];
 
 // Cache for UI elements (to support tap by index)
@@ -1061,6 +1085,38 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       };
     }
 
+    case "tap_by_text": {
+      const currentPlatform = platform ?? deviceManager.getCurrentPlatform();
+
+      if (currentPlatform !== "desktop") {
+        return { text: "tap_by_text is only available for Desktop (macOS). Use find_and_tap for Android or tap with coordinates for iOS." };
+      }
+
+      const text = args.text as string;
+      const pid = args.pid as number;
+      const exactMatch = (args.exactMatch as boolean) ?? false;
+
+      if (!text) {
+        return { text: "Missing required parameter: text" };
+      }
+      if (!pid) {
+        return { text: "Missing required parameter: pid. Use get_window_info to find the process ID." };
+      }
+
+      const result = await desktopClient.tapByText(text, pid, exactMatch);
+
+      if (result.success) {
+        return {
+          text: `✅ Tapped "${text}" (element: ${result.elementRole ?? "unknown"})\n` +
+                `Cursor was NOT moved - background automation successful.`
+        };
+      } else {
+        return {
+          text: `❌ Failed to tap "${text}": ${result.error}`
+        };
+      }
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -1070,7 +1126,7 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 const server = new Server(
   {
     name: "claude-mobile",
-    version: "2.4.0",
+    version: "2.7.0",
   },
   {
     capabilities: {
