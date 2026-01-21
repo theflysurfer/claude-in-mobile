@@ -67,6 +67,26 @@ export class AuroraClient {
       throw new Error("No device selected");
     }
   }
+
+  async tap(x: number, y: number): Promise<void> {
+    await this.runCommand(`audb tap ${x} ${y}`);
+  }
+
+  async longPress(x: number, y: number, duration: number): Promise<void> {
+    await this.runCommand(`audb tap ${x} ${y} --duration ${duration}`);
+  }
+
+  async swipeDirection(direction: "up"|"down"|"left"|"right"): Promise<void> {
+    await this.runCommand(`audb swipe ${direction}`);
+  }
+
+  async swipeCoords(x1: number, y1: number, x2: number, y2: number): Promise<void> {
+    await this.runCommand(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
+  }
+
+  async pressKey(key: string): Promise<void> {
+    await this.runCommand(`audb key ${key}`);
+  }
 }
 
 export const auroraClient = new AuroraClient();
