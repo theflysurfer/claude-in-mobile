@@ -188,6 +188,54 @@ export class AuroraClient {
     const output = await this.runCommand(`audb package uninstall ${packageName}`);
     return output || `Uninstalled ${packageName}`;
   }
+
+  /**
+   * Execute a shell command on the Aurora device
+   * @param command - Shell command to execute
+   * @returns Command output
+   */
+  async shell(command: string): Promise<string> {
+    const output = await this.runCommand(`audb shell ${command}`);
+    return output;
+  }
+
+  /**
+   * Get device logs with optional filters
+   * @param options - Log filtering options
+   * @returns Log output
+   */
+  async getLogs(options: {
+    lines?: number;
+    priority?: string;
+    unit?: string;
+    grep?: string;
+    since?: string;
+  } = {}): Promise<string> {
+    let cmd = "audb logs";
+    if (options.lines) cmd += ` -n ${options.lines}`;
+    if (options.priority) cmd += ` --priority ${options.priority}`;
+    if (options.unit) cmd += ` --unit ${options.unit}`;
+    if (options.grep) cmd += ` --grep '${options.grep}'`;
+    if (options.since) cmd += ` --since '${options.since}'`;
+
+    return await this.runCommand(cmd);
+  }
+
+  /**
+   * Clear device logs
+   * @returns Result message
+   */
+  async clearLogs(): Promise<string> {
+    return await this.runCommand("audb logs --clear --force");
+  }
+
+  /**
+   * Get detailed system information
+   * @returns System info output
+   */
+  async getSystemInfo(): Promise<string> {
+    return await this.runCommand("audb info");
+  }
 }
 
 export const auroraClient = new AuroraClient();
