@@ -1,6 +1,7 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs/promises";
+import { compressScreenshot } from "../utils/image.js";
 
 const execAsync = promisify(exec);
 
@@ -115,6 +116,32 @@ export class AuroraClient {
    */
   async pressKey(key: string): Promise<void> {
     await this.runCommand(`audb key ${key}`);
+  }
+
+  /**
+   * Takes a screenshot of the Aurora device
+   * @param options - Screenshot options (compression, size, quality)
+   * @returns Screenshot result with base64 data and MIME type
+   */
+  async screenshot(options: ScreenshotOptions = {}): Promise<ScreenshotResult> {
+    const tmpFile = `/tmp/aurora_screenshot_${Date.now()}.png`;
+    await this.runCommand(`audb screenshot --output ${tmpFile}`);
+
+    const buffer = await fs.readFile(tmpFile);
+    await fs.unlink(tmpFile);
+
+    if (options.compress !== false) {
+      return compressScreenshot(buffer, {
+        maxWidth: options.maxWidth,
+        maxHeight: options.maxHeight,
+        quality: options.quality,
+      });
+    }
+
+    return {
+      data: buffer.toString("base64"),
+      mimeType: "image/png",
+    };
   }
 }
 
