@@ -266,7 +266,7 @@ export class AuroraClient {
    */
   async pullFile(remotePath: string, localPath?: string): Promise<Buffer> {
     const local = localPath || remotePath.split("/").pop() || "pulled_file";
-    await this.runCommand(`audb pull ${remotePath} --output ${local}`);
+    await this.runCommand(`audb pull ${remotePath} --output "${local}"`);
     return await fs.readFile(local);
   }
 }
