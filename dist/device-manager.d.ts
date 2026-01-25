@@ -80,6 +80,10 @@ export declare class DeviceManager {
         mimeType: string;
     }>;
     /**
+     * Type guard for mobile clients with screenshotRaw support
+     */
+    private isMobileClientWithScreenshot;
+    /**
      * Take screenshot without compression (legacy)
      */
     screenshotRaw(platform?: Platform): string;

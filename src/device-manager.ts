@@ -161,9 +161,9 @@ export class DeviceManager {
       });
     }
 
-    // Get Aurora devices (use sync version)
+    // Get Aurora devices
     try {
-      const auroraDevices = this.aurora.listDevicesSync();
+      const auroraDevices = this.aurora.listDevices();
       for (const d of auroraDevices) {
         devices.push({
           id: d.id,
@@ -330,10 +330,8 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       await client.tap(x, y, targetPid);
-    } else if (client instanceof AuroraClient) {
-      await client.tap(x, y);
     } else {
-      (client as AdbClient | IosClient).tap(x, y);
+      (client as AdbClient | IosClient | AuroraClient).tap(x, y);
     }
   }
 
@@ -344,13 +342,15 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       await client.longPress(x, y, durationMs);
-    } else if (client instanceof AuroraClient) {
-      await client.longPress(x, y, durationMs);
     } else if (client instanceof AdbClient) {
       client.longPress(x, y, durationMs);
     } else {
-      // iOS: simulate with longer tap
-      (client as IosClient).tap(x, y);
+      // iOS and Aurora: simulate with longer tap (iOS) or use longPress (Aurora)
+      if (client instanceof IosClient) {
+        client.tap(x, y);
+      } else {
+        (client as AuroraClient).longPress(x, y, durationMs);
+      }
     }
   }
 
@@ -361,10 +361,8 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       await client.swipe(x1, y1, x2, y2, durationMs);
-    } else if (client instanceof AuroraClient) {
-      await client.swipe(x1, y1, x2, y2, durationMs);
     } else {
-      (client as AdbClient | IosClient).swipe(x1, y1, x2, y2, durationMs);
+      (client as AdbClient | IosClient | AuroraClient).swipe(x1, y1, x2, y2, durationMs);
     }
   }
 
@@ -375,10 +373,8 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       await client.swipeDirection(direction);
-    } else if (client instanceof AuroraClient) {
-      await client.swipeDirection(direction);
     } else {
-      (client as AdbClient | IosClient).swipeDirection(direction);
+      (client as AdbClient | IosClient | AuroraClient).swipeDirection(direction);
     }
   }
 
@@ -390,10 +386,8 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       await client.inputText(text, targetPid);
-    } else if (client instanceof AuroraClient) {
-      await client.inputText(text); // Will output warning, but won't break code
     } else {
-      (client as AdbClient | IosClient).inputText(text);
+      (client as AdbClient | IosClient | AuroraClient).inputText(text);
     }
   }
 
@@ -405,10 +399,8 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       await client.pressKey(key, undefined, targetPid);
-    } else if (client instanceof AuroraClient) {
-      await client.pressKey(key);
     } else {
-      (client as AdbClient | IosClient).pressKey(key);
+      (client as AdbClient | IosClient | AuroraClient).pressKey(key);
     }
   }
 
@@ -420,10 +412,7 @@ export class DeviceManager {
     if (client instanceof DesktopClient) {
       return client.launchApp(packageOrBundleId);
     }
-    if (client instanceof AuroraClient) {
-      return client.launchApp(packageOrBundleId);
-    }
-    return (client as AdbClient | IosClient).launchApp(packageOrBundleId);
+    return (client as AdbClient | IosClient | AuroraClient).launchApp(packageOrBundleId);
   }
 
   /**
@@ -433,10 +422,8 @@ export class DeviceManager {
     const client = this.getClient(platform);
     if (client instanceof DesktopClient) {
       client.stopApp(packageOrBundleId);
-    } else if (client instanceof AuroraClient) {
-      await client.stopApp(packageOrBundleId);
     } else {
-      (client as AdbClient | IosClient).stopApp(packageOrBundleId);
+      (client as AdbClient | IosClient | AuroraClient).stopApp(packageOrBundleId);
     }
   }
 
@@ -450,10 +437,8 @@ export class DeviceManager {
     }
     if (client instanceof AdbClient) {
       return client.installApk(path);
-    } else if (client instanceof AuroraClient) {
-      return client.installApp(path);
     } else {
-      return (client as IosClient).installApp(path);
+      return (client as IosClient | AuroraClient).installApp(path);
     }
   }
 
@@ -466,11 +451,8 @@ export class DeviceManager {
       const hierarchy = await client.getUiHierarchy();
       // Format as text for compatibility
       return formatDesktopHierarchy(hierarchy);
-    } else if (client instanceof AuroraClient) {
-      // Aurora: returns placeholder XML with warning (feature not available via audb)
-      return await client.getUiHierarchy();
     }
-    return (client as AdbClient | IosClient).getUiHierarchy();
+    return (client as AdbClient | IosClient | AuroraClient).getUiHierarchy();
   }
 
   /**
@@ -481,10 +463,7 @@ export class DeviceManager {
     if (client instanceof DesktopClient) {
       return client.shell(command);
     }
-    if (client instanceof AuroraClient) {
-      return client.shell(command);
-    }
-    return (client as AdbClient | IosClient).shell(command);
+    return (client as AdbClient | IosClient | AuroraClient).shell(command);
   }
 
   /**
@@ -563,10 +542,8 @@ export class DeviceManager {
     if (client instanceof AdbClient) {
       client.clearLogs();
       return "Logcat buffer cleared";
-    } else if (client instanceof AuroraClient) {
-      return client.clearLogs();
     } else {
-      return (client as IosClient).clearLogs();
+      return (client as IosClient | AuroraClient).clearLogs();
     }
   }
 
@@ -588,9 +565,9 @@ export class DeviceManager {
       const memory = client.getMemoryInfo();
       return `=== Battery ===\n${battery}\n\n=== Memory ===\n${memory}`;
     } else if (client instanceof AuroraClient) {
-      return await client.getSystemInfo();
+      return client.getSystemInfo();
     } else {
-      return "System info is only available for Android devices.";
+      return "System info is only available for Android and Aurora devices.";
     }
   }
 }

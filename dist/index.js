@@ -402,13 +402,13 @@ const tools = [
     // ============ Desktop Tools ============
     {
         name: "set_target",
-        description: "Switch the active target between Android, iOS, and Desktop platforms",
+        description: "Switch the active target between Android, iOS, Desktop, and Aurora platforms",
         inputSchema: {
             type: "object",
             properties: {
                 target: {
                     type: "string",
-                    enum: ["android", "ios", "desktop"],
+                    enum: ["android", "ios", "desktop", "aurora"],
                     description: "Target platform to switch to",
                 },
             },

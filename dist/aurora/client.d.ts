@@ -25,38 +25,32 @@ export interface LogOptions {
 }
 export declare class AuroraClient {
     private escapeShellArg;
-    private runCommand;
+    private runCommandSync;
     checkAvailability(): Promise<boolean>;
     /**
      * List all configured Aurora devices
      * @returns Array of Device objects
      */
-    listDevices(): Promise<Device[]>;
-    /**
-     * Synchronous version of listDevices using execSync
-     * List all configured Aurora devices
-     * @returns Array of Device objects
-     */
-    listDevicesSync(): Device[];
-    getActiveDevice(): Promise<string>;
+    listDevices(): Device[];
+    getActiveDevice(): string;
     /**
      * Performs a tap at the specified coordinates.
      * @param x - X coordinate in pixels
      * @param y - Y coordinate in pixels
      */
-    tap(x: number, y: number): Promise<void>;
+    tap(x: number, y: number): void;
     /**
      * Performs a long press at the specified coordinates.
      * @param x - X coordinate in pixels
      * @param y - Y coordinate in pixels
      * @param duration - Duration of the press in milliseconds
      */
-    longPress(x: number, y: number, duration: number): Promise<void>;
+    longPress(x: number, y: number, duration: number): void;
     /**
      * Performs a swipe in the specified direction.
      * @param direction - Direction to swipe: "up", "down", "left", or "right"
      */
-    swipeDirection(direction: "up" | "down" | "left" | "right"): Promise<void>;
+    swipeDirection(direction: "up" | "down" | "left" | "right"): void;
     /**
      * Performs a swipe from one coordinate to another.
      * @param x1 - Starting X coordinate in pixels
@@ -64,7 +58,7 @@ export declare class AuroraClient {
      * @param x2 - Ending X coordinate in pixels
      * @param y2 - Ending Y coordinate in pixels
      */
-    swipeCoords(x1: number, y1: number, x2: number, y2: number): Promise<void>;
+    swipeCoords(x1: number, y1: number, x2: number, y2: number): void;
     /**
      * Performs a swipe from one coordinate to another.
      * Compatible with AdbClient signature.
@@ -74,29 +68,34 @@ export declare class AuroraClient {
      * @param y2 - Ending Y coordinate
      * @param durationMs - Duration in milliseconds (ignored by audb, kept for compatibility)
      */
-    swipe(x1: number, y1: number, x2: number, y2: number, durationMs?: number): Promise<void>;
+    swipe(x1: number, y1: number, x2: number, y2: number, durationMs?: number): void;
     /**
      * Input text on Aurora device.
      * @unimplemented - audb doesn't have direct text input support yet
      * @todo Implement via clipboard or D-Bus when available
      */
-    inputText(text: string): Promise<void>;
+    inputText(text: string): void;
     /**
      * Get UI hierarchy from Aurora device.
      * @unimplemented - UI scraping not available via audb yet
      * @todo Implement when audb adds UI dump support
      */
-    getUiHierarchy(): Promise<string>;
+    getUiHierarchy(): string;
     /**
      * Clear app data on Aurora device.
      * @unimplemented - audb doesn't have this command yet
      */
-    clearAppData(packageName: string): Promise<void>;
+    clearAppData(packageName: string): void;
     /**
      * Sends a keyboard key event to the device.
      * @param key - Key name to send (e.g., "Enter", "Back", "Home")
      */
-    pressKey(key: string): Promise<void>;
+    pressKey(key: string): void;
+    /**
+     * Take screenshot and return raw PNG buffer (consistent with Android/iOS)
+     * @returns Raw PNG buffer
+     */
+    screenshotRaw(): Buffer;
     /**
      * Takes a screenshot of the Aurora device
      * @param options - Screenshot options (compression, size, quality)
@@ -108,30 +107,29 @@ export declare class AuroraClient {
      * @param packageName - Application name (D-Bus format: ru.domain.AppName)
      * @returns Output message from audb
      */
-    launchApp(packageName: string): Promise<string>;
+    launchApp(packageName: string): string;
     /**
      * Stop a running application
      * @param packageName - Application name (D-Bus format: ru.domain.AppName)
-     * @returns Promise that resolves when the app is stopped
      */
-    stopApp(packageName: string): Promise<void>;
+    stopApp(packageName: string): void;
     /**
      * Install an RPM package on the Aurora device
      * @param path - Local path to the RPM file
      * @returns Installation result message
      */
-    installApp(path: string): Promise<string>;
+    installApp(path: string): string;
     /**
      * Uninstall a package from the Aurora device
      * @param packageName - Package name (e.g., ru.domain.AppName)
      * @returns Uninstallation result message
      */
-    uninstallApp(packageName: string): Promise<string>;
+    uninstallApp(packageName: string): string;
     /**
      * List installed packages on the Aurora device
      * @returns Array of package names
      */
-    listPackages(): Promise<string[]>;
+    listPackages(): string[];
     /**
      * Execute a shell command on the Aurora device
      *
@@ -141,7 +139,7 @@ export declare class AuroraClient {
      * @param command - Shell command to execute (must be validated/sanitized)
      * @returns Command output
      */
-    shell(command: string): Promise<string>;
+    shell(command: string): string;
     /**
      * Get device logs with optional filters
      * @param options - Log filtering options
@@ -152,31 +150,31 @@ export declare class AuroraClient {
      * @param options.since - Show logs since timestamp
      * @returns Log output
      */
-    getLogs(options?: LogOptions): Promise<string>;
+    getLogs(options?: LogOptions): string;
     /**
      * Clear device logs
      * @returns Result message
      */
-    clearLogs(): Promise<string>;
+    clearLogs(): string;
     /**
      * Get detailed system information
      * @returns System info output
      */
-    getSystemInfo(): Promise<string>;
+    getSystemInfo(): string;
     /**
      * Upload a file to the Aurora device
      * @param localPath - Path to the local file
      * @param remotePath - Destination path on the device
      * @returns Upload result message
      */
-    pushFile(localPath: string, remotePath: string): Promise<string>;
+    pushFile(localPath: string, remotePath: string): string;
     /**
      * Download a file from the Aurora device
      * @param remotePath - Path to the remote file
      * @param localPath - Optional local destination path (defaults to remote filename)
      * @returns File contents as Buffer
      */
-    pullFile(remotePath: string, localPath?: string): Promise<Buffer>;
+    pullFile(remotePath: string, localPath?: string): Buffer;
 }
 export declare const auroraClient: AuroraClient;
 //# sourceMappingURL=client.d.ts.map

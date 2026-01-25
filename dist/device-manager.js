@@ -126,9 +126,9 @@ export class DeviceManager {
                 isSimulator: false
             });
         }
-        // Get Aurora devices (use sync version)
+        // Get Aurora devices
         try {
-            const auroraDevices = this.aurora.listDevicesSync();
+            const auroraDevices = this.aurora.listDevices();
             for (const d of auroraDevices) {
                 devices.push({
                     id: d.id,
@@ -228,12 +228,8 @@ export class DeviceManager {
             });
             return { data: result.base64, mimeType: result.mimeType };
         }
-        // Handle AuroraClient
-        if ("screenshot" in client && typeof client.screenshot === "function" && !("screenshotRaw" in client)) {
-            return await client.screenshot({ compress, ...options });
-        }
-        // Handle Android and iOS clients
-        if ("screenshotRaw" in client && typeof client.screenshotRaw === "function") {
+        // Handle Android, iOS, Aurora clients (all have screenshotRaw)
+        if (this.isMobileClientWithScreenshot(client)) {
             const buffer = client.screenshotRaw();
             if (compress) {
                 return compressScreenshot(buffer, options);
@@ -243,20 +239,27 @@ export class DeviceManager {
         throw new Error(`Screenshot not supported for platform: ${p}`);
     }
     /**
+     * Type guard for mobile clients with screenshotRaw support
+     */
+    isMobileClientWithScreenshot(client) {
+        return (client instanceof AdbClient ||
+            client instanceof IosClient ||
+            client instanceof AuroraClient);
+    }
+    /**
      * Take screenshot without compression (legacy)
      */
     screenshotRaw(platform) {
         const client = this.getClient(platform);
-        // Desktop and Aurora don't support screenshotRaw
+        // Desktop doesn't support screenshotRaw (different architecture)
         if (client instanceof DesktopClient) {
             throw new Error("Use screenshot() for desktop platform");
         }
-        // Aurora client doesn't have screenshotRaw
-        if ("screenshot" in client && typeof client.screenshot === "function" && !("screenshotRaw" in client)) {
-            throw new Error("Use screenshot() for aurora platform");
+        // All mobile platforms (Android, iOS, Aurora) support screenshotRaw
+        if (this.isMobileClientWithScreenshot(client)) {
+            return client.screenshotRaw().toString("base64");
         }
-        // Android and iOS clients
-        return client.screenshot();
+        throw new Error(`Screenshot not supported for platform: ${platform ?? this.getCurrentPlatform()}`);
     }
     /**
      * Tap at coordinates
@@ -266,9 +269,6 @@ export class DeviceManager {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
             await client.tap(x, y, targetPid);
-        }
-        else if (client instanceof AuroraClient) {
-            await client.tap(x, y);
         }
         else {
             client.tap(x, y);
@@ -282,15 +282,17 @@ export class DeviceManager {
         if (client instanceof DesktopClient) {
             await client.longPress(x, y, durationMs);
         }
-        else if (client instanceof AuroraClient) {
-            await client.longPress(x, y, durationMs);
-        }
         else if (client instanceof AdbClient) {
             client.longPress(x, y, durationMs);
         }
         else {
-            // iOS: simulate with longer tap
-            client.tap(x, y);
+            // iOS and Aurora: simulate with longer tap (iOS) or use longPress (Aurora)
+            if (client instanceof IosClient) {
+                client.tap(x, y);
+            }
+            else {
+                client.longPress(x, y, durationMs);
+            }
         }
     }
     /**
@@ -299,9 +301,6 @@ export class DeviceManager {
     async swipe(x1, y1, x2, y2, durationMs = 300, platform) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
-            await client.swipe(x1, y1, x2, y2, durationMs);
-        }
-        else if (client instanceof AuroraClient) {
             await client.swipe(x1, y1, x2, y2, durationMs);
         }
         else {
@@ -314,9 +313,6 @@ export class DeviceManager {
     async swipeDirection(direction, platform) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
-            await client.swipeDirection(direction);
-        }
-        else if (client instanceof AuroraClient) {
             await client.swipeDirection(direction);
         }
         else {
@@ -332,9 +328,6 @@ export class DeviceManager {
         if (client instanceof DesktopClient) {
             await client.inputText(text, targetPid);
         }
-        else if (client instanceof AuroraClient) {
-            await client.inputText(text); // Will output warning, but won't break code
-        }
         else {
             client.inputText(text);
         }
@@ -348,9 +341,6 @@ export class DeviceManager {
         if (client instanceof DesktopClient) {
             await client.pressKey(key, undefined, targetPid);
         }
-        else if (client instanceof AuroraClient) {
-            await client.pressKey(key);
-        }
         else {
             client.pressKey(key);
         }
@@ -363,9 +353,6 @@ export class DeviceManager {
         if (client instanceof DesktopClient) {
             return client.launchApp(packageOrBundleId);
         }
-        if (client instanceof AuroraClient) {
-            return client.launchApp(packageOrBundleId);
-        }
         return client.launchApp(packageOrBundleId);
     }
     /**
@@ -375,9 +362,6 @@ export class DeviceManager {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
             client.stopApp(packageOrBundleId);
-        }
-        else if (client instanceof AuroraClient) {
-            await client.stopApp(packageOrBundleId);
         }
         else {
             client.stopApp(packageOrBundleId);
@@ -394,9 +378,6 @@ export class DeviceManager {
         if (client instanceof AdbClient) {
             return client.installApk(path);
         }
-        else if (client instanceof AuroraClient) {
-            return client.installApp(path);
-        }
         else {
             return client.installApp(path);
         }
@@ -411,10 +392,6 @@ export class DeviceManager {
             // Format as text for compatibility
             return formatDesktopHierarchy(hierarchy);
         }
-        else if (client instanceof AuroraClient) {
-            // Aurora: returns placeholder XML with warning (feature not available via audb)
-            return await client.getUiHierarchy();
-        }
         return client.getUiHierarchy();
     }
     /**
@@ -423,9 +400,6 @@ export class DeviceManager {
     async shell(command, platform) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
-            return client.shell(command);
-        }
-        if (client instanceof AuroraClient) {
             return client.shell(command);
         }
         return client.shell(command);
@@ -493,9 +467,6 @@ export class DeviceManager {
             client.clearLogs();
             return "Logcat buffer cleared";
         }
-        else if (client instanceof AuroraClient) {
-            return client.clearLogs();
-        }
         else {
             return client.clearLogs();
         }
@@ -516,10 +487,10 @@ export class DeviceManager {
             return `=== Battery ===\n${battery}\n\n=== Memory ===\n${memory}`;
         }
         else if (client instanceof AuroraClient) {
-            return await client.getSystemInfo();
+            return client.getSystemInfo();
         }
         else {
-            return "System info is only available for Android devices.";
+            return "System info is only available for Android and Aurora devices.";
         }
     }
 }

@@ -1,10 +1,8 @@
-import { exec, execSync } from "child_process";
-import { promisify } from "util";
-import * as fs from "fs/promises";
+import { execSync } from "child_process";
+import { readFileSync, unlinkSync } from "fs";
 import { randomBytes } from "crypto";
 import { tmpdir } from "os";
 import { compressScreenshot } from "../utils/image.js";
-const execAsync = promisify(exec);
 export class AuroraClient {
     escapeShellArg(arg) {
         return arg
@@ -22,18 +20,10 @@ export class AuroraClient {
             .replace(/\|/g, "\\|")
             .replace(/;/g, "\\;");
     }
-    async runCommand(command) {
+    runCommandSync(command) {
         try {
-            const { stdout, stderr } = await execAsync(command);
-            if (stderr && stderr.trim()) {
-                if (stderr.includes("No device selected")) {
-                    throw new Error("No Aurora device selected. Run:\n" +
-                        "  1. audb device list\n" +
-                        "  2. audb select <device>");
-                }
-                console.warn(`[Aurora] Command produced stderr: ${stderr}`);
-            }
-            return stdout.trim();
+            const output = execSync(command, { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024 });
+            return output.trim();
         }
         catch (error) {
             if (error instanceof Error) {
@@ -47,7 +37,7 @@ export class AuroraClient {
     }
     async checkAvailability() {
         try {
-            await execAsync("audb --version");
+            execSync("audb --version", { encoding: "utf-8" });
             return true;
         }
         catch {
@@ -58,9 +48,9 @@ export class AuroraClient {
      * List all configured Aurora devices
      * @returns Array of Device objects
      */
-    async listDevices() {
+    listDevices() {
         try {
-            const output = await this.runCommand("audb device list");
+            const output = this.runCommandSync("audb device list");
             const devices = [];
             // Strip ANSI escape codes
             const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '');
@@ -93,50 +83,10 @@ export class AuroraClient {
             return [];
         }
     }
-    /**
-     * Synchronous version of listDevices using execSync
-     * List all configured Aurora devices
-     * @returns Array of Device objects
-     */
-    listDevicesSync() {
-        try {
-            const output = execSync("audb device list", { encoding: "utf-8" });
-            const devices = [];
-            // Strip ANSI escape codes
-            const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '');
-            const lines = cleanOutput.split("\n");
-            for (const line of lines) {
-                // Skip headers, separators, and empty lines
-                if (!line.trim() || line.includes("---") || line.includes("Index"))
-                    continue;
-                // Parse format: "0     R570                 192.168.2.13       22     aurora-arm connected(3609s) *"
-                const match = line.match(/^\s*\d+\s+(\S+)\s+([\d.]+)\s+\d+\s+(?:\S+)\s+(.+?)\s*(?:\*)?$/);
-                if (match) {
-                    const [, name, host, status] = match;
-                    const isConnected = status.includes("connected");
-                    devices.push({
-                        id: host,
-                        name: name.trim(),
-                        platform: "aurora",
-                        state: isConnected ? "connected" : "disconnected",
-                        isSimulator: false,
-                        host,
-                    });
-                }
-            }
-            return devices;
-        }
-        catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`[Aurora] Failed to list devices (sync): ${errorMessage}`);
-            // Return empty array on error (e.g., audb not installed)
-            return [];
-        }
-    }
-    async getActiveDevice() {
+    getActiveDevice() {
         const path = `${process.env.HOME}/.config/audb/current_device`;
         try {
-            return await fs.readFile(path, "utf-8");
+            return readFileSync(path, "utf-8");
         }
         catch (error) {
             if (error instanceof Error && 'code' in error) {
@@ -153,8 +103,8 @@ export class AuroraClient {
      * @param x - X coordinate in pixels
      * @param y - Y coordinate in pixels
      */
-    async tap(x, y) {
-        await this.runCommand(`audb tap ${x} ${y}`);
+    tap(x, y) {
+        this.runCommandSync(`audb tap ${x} ${y}`);
     }
     /**
      * Performs a long press at the specified coordinates.
@@ -162,15 +112,15 @@ export class AuroraClient {
      * @param y - Y coordinate in pixels
      * @param duration - Duration of the press in milliseconds
      */
-    async longPress(x, y, duration) {
-        await this.runCommand(`audb tap ${x} ${y} --duration ${duration}`);
+    longPress(x, y, duration) {
+        this.runCommandSync(`audb tap ${x} ${y} --duration ${duration}`);
     }
     /**
      * Performs a swipe in the specified direction.
      * @param direction - Direction to swipe: "up", "down", "left", or "right"
      */
-    async swipeDirection(direction) {
-        await this.runCommand(`audb swipe ${direction}`);
+    swipeDirection(direction) {
+        this.runCommandSync(`audb swipe ${direction}`);
     }
     /**
      * Performs a swipe from one coordinate to another.
@@ -179,8 +129,8 @@ export class AuroraClient {
      * @param x2 - Ending X coordinate in pixels
      * @param y2 - Ending Y coordinate in pixels
      */
-    async swipeCoords(x1, y1, x2, y2) {
-        await this.runCommand(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
+    swipeCoords(x1, y1, x2, y2) {
+        this.runCommandSync(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
     }
     /**
      * Performs a swipe from one coordinate to another.
@@ -191,15 +141,15 @@ export class AuroraClient {
      * @param y2 - Ending Y coordinate
      * @param durationMs - Duration in milliseconds (ignored by audb, kept for compatibility)
      */
-    async swipe(x1, y1, x2, y2, durationMs) {
-        await this.runCommand(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
+    swipe(x1, y1, x2, y2, durationMs) {
+        this.runCommandSync(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
     }
     /**
      * Input text on Aurora device.
      * @unimplemented - audb doesn't have direct text input support yet
      * @todo Implement via clipboard or D-Bus when available
      */
-    async inputText(text) {
+    inputText(text) {
         console.warn(`[Aurora] inputText not implemented: "${text}"`);
         // Placeholder - return silently or implement via clipboard in future
     }
@@ -208,7 +158,7 @@ export class AuroraClient {
      * @unimplemented - UI scraping not available via audb yet
      * @todo Implement when audb adds UI dump support
      */
-    async getUiHierarchy() {
+    getUiHierarchy() {
         console.warn("[Aurora] getUiHierarchy not implemented");
         return "<hierarchy><note>Aurora UI hierarchy not yet available via audb</note></hierarchy>";
     }
@@ -216,15 +166,33 @@ export class AuroraClient {
      * Clear app data on Aurora device.
      * @unimplemented - audb doesn't have this command yet
      */
-    async clearAppData(packageName) {
+    clearAppData(packageName) {
         console.warn(`[Aurora] clearAppData not implemented for ${packageName}`);
     }
     /**
      * Sends a keyboard key event to the device.
      * @param key - Key name to send (e.g., "Enter", "Back", "Home")
      */
-    async pressKey(key) {
-        await this.runCommand(`audb key ${key}`);
+    pressKey(key) {
+        this.runCommandSync(`audb key ${key}`);
+    }
+    /**
+     * Take screenshot and return raw PNG buffer (consistent with Android/iOS)
+     * @returns Raw PNG buffer
+     */
+    screenshotRaw() {
+        const uniqueId = randomBytes(8).toString("hex");
+        const tmpFile = `${tmpdir()}/aurora_screenshot_${uniqueId}.png`;
+        try {
+            execSync(`audb screenshot --output "${tmpFile}"`);
+            return readFileSync(tmpFile);
+        }
+        finally {
+            try {
+                unlinkSync(tmpFile);
+            }
+            catch { }
+        }
     }
     /**
      * Takes a screenshot of the Aurora device
@@ -232,52 +200,42 @@ export class AuroraClient {
      * @returns Screenshot result with base64 data and MIME type
      */
     async screenshot(options = {}) {
-        const uniqueId = randomBytes(8).toString("hex");
-        const tmpFile = `${tmpdir()}/aurora_screenshot_${uniqueId}.png`;
-        try {
-            await this.runCommand(`audb screenshot --output "${tmpFile}"`);
-            const buffer = await fs.readFile(tmpFile);
-            if (options.compress !== false) {
-                return compressScreenshot(buffer, {
-                    maxWidth: options.maxWidth,
-                    maxHeight: options.maxHeight,
-                    quality: options.quality,
-                });
-            }
-            return {
-                data: buffer.toString("base64"),
-                mimeType: "image/png",
-            };
+        const buffer = this.screenshotRaw();
+        if (options.compress !== false) {
+            return compressScreenshot(buffer, {
+                maxWidth: options.maxWidth,
+                maxHeight: options.maxHeight,
+                quality: options.quality,
+            });
         }
-        finally {
-            // Always cleanup temp file
-            await fs.unlink(tmpFile).catch(() => { });
-        }
+        return {
+            data: buffer.toString("base64"),
+            mimeType: "image/png",
+        };
     }
     /**
      * Launch an application on the Aurora device
      * @param packageName - Application name (D-Bus format: ru.domain.AppName)
      * @returns Output message from audb
      */
-    async launchApp(packageName) {
-        const output = await this.runCommand(`audb launch ${packageName}`);
+    launchApp(packageName) {
+        const output = this.runCommandSync(`audb launch ${packageName}`);
         return output || `Launched ${packageName}`;
     }
     /**
      * Stop a running application
      * @param packageName - Application name (D-Bus format: ru.domain.AppName)
-     * @returns Promise that resolves when the app is stopped
      */
-    async stopApp(packageName) {
-        await this.runCommand(`audb stop ${packageName}`);
+    stopApp(packageName) {
+        this.runCommandSync(`audb stop ${packageName}`);
     }
     /**
      * Install an RPM package on the Aurora device
      * @param path - Local path to the RPM file
      * @returns Installation result message
      */
-    async installApp(path) {
-        const output = await this.runCommand(`audb package install ${path}`);
+    installApp(path) {
+        const output = this.runCommandSync(`audb package install ${path}`);
         return output || `Installed ${path}`;
     }
     /**
@@ -285,16 +243,16 @@ export class AuroraClient {
      * @param packageName - Package name (e.g., ru.domain.AppName)
      * @returns Uninstallation result message
      */
-    async uninstallApp(packageName) {
-        const output = await this.runCommand(`audb package uninstall ${packageName}`);
+    uninstallApp(packageName) {
+        const output = this.runCommandSync(`audb package uninstall ${packageName}`);
         return output || `Uninstalled ${packageName}`;
     }
     /**
      * List installed packages on the Aurora device
      * @returns Array of package names
      */
-    async listPackages() {
-        const output = await this.runCommand("audb package list");
+    listPackages() {
+        const output = this.runCommandSync("audb package list");
         if (!output)
             return [];
         return output.split("\n").filter(line => line.trim().length > 0);
@@ -308,9 +266,9 @@ export class AuroraClient {
      * @param command - Shell command to execute (must be validated/sanitized)
      * @returns Command output
      */
-    async shell(command) {
+    shell(command) {
         const escaped = this.escapeShellArg(command);
-        return await this.runCommand(`audb shell ${escaped}`);
+        return this.runCommandSync(`audb shell ${escaped}`);
     }
     /**
      * Get device logs with optional filters
@@ -322,7 +280,7 @@ export class AuroraClient {
      * @param options.since - Show logs since timestamp
      * @returns Log output
      */
-    async getLogs(options = {}) {
+    getLogs(options = {}) {
         let cmd = "audb logs";
         if (options.lines)
             cmd += ` -n ${options.lines}`;
@@ -338,21 +296,21 @@ export class AuroraClient {
             const escaped = options.since.replace(/'/g, "'\\''");
             cmd += ` --since '${escaped}'`;
         }
-        return await this.runCommand(cmd);
+        return this.runCommandSync(cmd);
     }
     /**
      * Clear device logs
      * @returns Result message
      */
-    async clearLogs() {
-        return await this.runCommand("audb logs --clear --force");
+    clearLogs() {
+        return this.runCommandSync("audb logs --clear --force");
     }
     /**
      * Get detailed system information
      * @returns System info output
      */
-    async getSystemInfo() {
-        return await this.runCommand("audb info");
+    getSystemInfo() {
+        return this.runCommandSync("audb info");
     }
     /**
      * Upload a file to the Aurora device
@@ -360,8 +318,8 @@ export class AuroraClient {
      * @param remotePath - Destination path on the device
      * @returns Upload result message
      */
-    async pushFile(localPath, remotePath) {
-        const output = await this.runCommand(`audb push ${localPath} ${remotePath}`);
+    pushFile(localPath, remotePath) {
+        const output = this.runCommandSync(`audb push ${localPath} ${remotePath}`);
         return output || `Uploaded ${localPath} → ${remotePath}`;
     }
     /**
@@ -370,10 +328,10 @@ export class AuroraClient {
      * @param localPath - Optional local destination path (defaults to remote filename)
      * @returns File contents as Buffer
      */
-    async pullFile(remotePath, localPath) {
+    pullFile(remotePath, localPath) {
         const local = localPath || remotePath.split("/").pop() || "pulled_file";
-        await this.runCommand(`audb pull ${remotePath} --output "${local}"`);
-        return await fs.readFile(local);
+        this.runCommandSync(`audb pull ${remotePath} --output "${local}"`);
+        return readFileSync(local);
     }
 }
 export const auroraClient = new AuroraClient();
