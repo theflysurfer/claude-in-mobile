@@ -24,6 +24,7 @@ export interface LogOptions {
     since?: string;
 }
 export declare class AuroraClient {
+    private escapeShellArg;
     private runCommand;
     checkAvailability(): Promise<boolean>;
     /**
@@ -31,6 +32,12 @@ export declare class AuroraClient {
      * @returns Array of Device objects
      */
     listDevices(): Promise<Device[]>;
+    /**
+     * Synchronous version of listDevices using execSync
+     * List all configured Aurora devices
+     * @returns Array of Device objects
+     */
+    listDevicesSync(): Device[];
     getActiveDevice(): Promise<string>;
     /**
      * Performs a tap at the specified coordinates.
@@ -58,6 +65,33 @@ export declare class AuroraClient {
      * @param y2 - Ending Y coordinate in pixels
      */
     swipeCoords(x1: number, y1: number, x2: number, y2: number): Promise<void>;
+    /**
+     * Performs a swipe from one coordinate to another.
+     * Compatible with AdbClient signature.
+     * @param x1 - Starting X coordinate
+     * @param y1 - Starting Y coordinate
+     * @param x2 - Ending X coordinate
+     * @param y2 - Ending Y coordinate
+     * @param durationMs - Duration in milliseconds (ignored by audb, kept for compatibility)
+     */
+    swipe(x1: number, y1: number, x2: number, y2: number, durationMs?: number): Promise<void>;
+    /**
+     * Input text on Aurora device.
+     * @unimplemented - audb doesn't have direct text input support yet
+     * @todo Implement via clipboard or D-Bus when available
+     */
+    inputText(text: string): Promise<void>;
+    /**
+     * Get UI hierarchy from Aurora device.
+     * @unimplemented - UI scraping not available via audb yet
+     * @todo Implement when audb adds UI dump support
+     */
+    getUiHierarchy(): Promise<string>;
+    /**
+     * Clear app data on Aurora device.
+     * @unimplemented - audb doesn't have this command yet
+     */
+    clearAppData(packageName: string): Promise<void>;
     /**
      * Sends a keyboard key event to the device.
      * @param key - Key name to send (e.g., "Enter", "Back", "Home")

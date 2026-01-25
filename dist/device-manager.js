@@ -81,7 +81,7 @@ export class DeviceManager {
     /**
      * Get all connected devices (Android + iOS + Aurora)
      */
-    async getAllDevices() {
+    getAllDevices() {
         const devices = [];
         // Get Android devices
         try {
@@ -126,9 +126,9 @@ export class DeviceManager {
                 isSimulator: false
             });
         }
-        // Get Aurora devices
+        // Get Aurora devices (use sync version)
         try {
-            const auroraDevices = await this.aurora.listDevices();
+            const auroraDevices = this.aurora.listDevicesSync();
             for (const d of auroraDevices) {
                 devices.push({
                     id: d.id,
@@ -147,8 +147,8 @@ export class DeviceManager {
     /**
      * Get devices filtered by platform
      */
-    async getDevices(platform) {
-        const all = await this.getAllDevices();
+    getDevices(platform) {
+        const all = this.getAllDevices();
         if (!platform)
             return all;
         return all.filter(d => d.platform === platform);
@@ -156,7 +156,7 @@ export class DeviceManager {
     /**
      * Set active device
      */
-    async setDevice(deviceId, platform) {
+    setDevice(deviceId, platform) {
         // Handle desktop special case
         if (deviceId === "desktop" || platform === "desktop") {
             if (!this.desktopClient.isRunning()) {
@@ -171,7 +171,7 @@ export class DeviceManager {
                 isSimulator: false
             };
         }
-        const devices = await this.getAllDevices();
+        const devices = this.getAllDevices();
         // Find device by ID
         let device = devices.find(d => d.id === deviceId);
         // If platform specified but device not found, try to match
@@ -267,6 +267,9 @@ export class DeviceManager {
         if (client instanceof DesktopClient) {
             await client.tap(x, y, targetPid);
         }
+        else if (client instanceof AuroraClient) {
+            await client.tap(x, y);
+        }
         else {
             client.tap(x, y);
         }
@@ -277,6 +280,9 @@ export class DeviceManager {
     async longPress(x, y, durationMs = 1000, platform) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
+            await client.longPress(x, y, durationMs);
+        }
+        else if (client instanceof AuroraClient) {
             await client.longPress(x, y, durationMs);
         }
         else if (client instanceof AdbClient) {
@@ -293,6 +299,9 @@ export class DeviceManager {
     async swipe(x1, y1, x2, y2, durationMs = 300, platform) {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
+            await client.swipe(x1, y1, x2, y2, durationMs);
+        }
+        else if (client instanceof AuroraClient) {
             await client.swipe(x1, y1, x2, y2, durationMs);
         }
         else {
@@ -319,6 +328,9 @@ export class DeviceManager {
         const client = this.getClient(platform);
         if (client instanceof DesktopClient) {
             await client.inputText(text, targetPid);
+        }
+        else if (client instanceof AuroraClient) {
+            await client.inputText(text); // Will output warning, but won't break code
         }
         else {
             client.inputText(text);

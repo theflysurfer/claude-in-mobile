@@ -50,15 +50,15 @@ export declare class DeviceManager {
     /**
      * Get all connected devices (Android + iOS + Aurora)
      */
-    getAllDevices(): Promise<Device[]>;
+    getAllDevices(): Device[];
     /**
      * Get devices filtered by platform
      */
-    getDevices(platform?: Platform): Promise<Device[]>;
+    getDevices(platform?: Platform): Device[];
     /**
      * Set active device
      */
-    setDevice(deviceId: string, platform?: Platform): Promise<Device>;
+    setDevice(deviceId: string, platform?: Platform): Device;
     /**
      * Get active device
      */

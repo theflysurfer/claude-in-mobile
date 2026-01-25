@@ -85,7 +85,7 @@ claude mcp add --transport stdio mobile -- cmd /c npx -y claude-in-android
 ### Aurora OS
 - audb CLI installed and in PATH (`cargo install audb-client`)
 - Connected Aurora OS device with SSH enabled
-- Python 3 on device (`devel-su pkcon install python3`)
+- Python on device required for tap/swipe: `devel-su pkcon install python`
 
 ## Available Tools
 
@@ -96,9 +96,9 @@ claude mcp add --transport stdio mobile -- cmd /c npx -y claude-in-android
 | `list_devices` | ✅ | ✅ | ✅ | ✅ | List all connected devices |
 | `set_device` | ✅ | ✅ | ✅ | ✅ | Select active device |
 | `screenshot` | ✅ | ✅ | ✅ | ✅ | Take screenshot |
-| `tap` | ✅ | ✅ | ✅ | ✅ | Tap at coordinates or by text |
+| `tap` | ✅ | ✅ | ✅ | ⚠️ | Tap at coordinates or by text (requires Python on Aurora) |
 | `long_press` | ✅ | ✅ | ✅ | ✅ | Long press gesture |
-| `swipe` | ✅ | ✅ | ✅ | ✅ | Swipe in direction or coordinates |
+| `swipe` | ✅ | ✅ | ✅ | ⚠️ | Swipe in direction or coordinates (requires Python on Aurora) |
 | `input_text` | ✅ | ✅ | ✅ | ❌ | Type text (not available on Aurora) |
 | `press_key` | ✅ | ✅ | ✅ | ✅ | Press hardware buttons |
 | `launch_app` | ✅ | ✅ | ❌ | ✅ | Launch app |

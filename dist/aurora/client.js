@@ -1,17 +1,37 @@
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs/promises";
 import { randomBytes } from "crypto";
+import { tmpdir } from "os";
 import { compressScreenshot } from "../utils/image.js";
 const execAsync = promisify(exec);
 export class AuroraClient {
+    escapeShellArg(arg) {
+        return arg
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"')
+            .replace(/'/g, "\\'")
+            .replace(/`/g, "\\`")
+            .replace(/\$/g, "\\$")
+            .replace(/ /g, "%s")
+            .replace(/&/g, "\\&")
+            .replace(/\(/g, "\\(")
+            .replace(/\)/g, "\\)")
+            .replace(/</g, "\\<")
+            .replace(/>/g, "\\>")
+            .replace(/\|/g, "\\|")
+            .replace(/;/g, "\\;");
+    }
     async runCommand(command) {
         try {
             const { stdout, stderr } = await execAsync(command);
-            if (stderr?.includes("No device selected")) {
-                throw new Error("No Aurora device selected. Run:\n" +
-                    "  1. audb device list\n" +
-                    "  2. audb select <device>");
+            if (stderr && stderr.trim()) {
+                if (stderr.includes("No device selected")) {
+                    throw new Error("No Aurora device selected. Run:\n" +
+                        "  1. audb device list\n" +
+                        "  2. audb select <device>");
+                }
+                console.warn(`[Aurora] Command produced stderr: ${stderr}`);
             }
             return stdout.trim();
         }
@@ -67,17 +87,65 @@ export class AuroraClient {
             return devices;
         }
         catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[Aurora] Failed to list devices: ${errorMessage}`);
+            // Return empty array on error (e.g., audb not installed)
+            return [];
+        }
+    }
+    /**
+     * Synchronous version of listDevices using execSync
+     * List all configured Aurora devices
+     * @returns Array of Device objects
+     */
+    listDevicesSync() {
+        try {
+            const output = execSync("audb device list", { encoding: "utf-8" });
+            const devices = [];
+            // Strip ANSI escape codes
+            const cleanOutput = output.replace(/\x1b\[[0-9;]*m/g, '');
+            const lines = cleanOutput.split("\n");
+            for (const line of lines) {
+                // Skip headers, separators, and empty lines
+                if (!line.trim() || line.includes("---") || line.includes("Index"))
+                    continue;
+                // Parse format: "0     R570                 192.168.2.13       22     aurora-arm connected(3609s) *"
+                const match = line.match(/^\s*\d+\s+(\S+)\s+([\d.]+)\s+\d+\s+(?:\S+)\s+(.+?)\s*(?:\*)?$/);
+                if (match) {
+                    const [, name, host, status] = match;
+                    const isConnected = status.includes("connected");
+                    devices.push({
+                        id: host,
+                        name: name.trim(),
+                        platform: "aurora",
+                        state: isConnected ? "connected" : "disconnected",
+                        isSimulator: false,
+                        host,
+                    });
+                }
+            }
+            return devices;
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[Aurora] Failed to list devices (sync): ${errorMessage}`);
             // Return empty array on error (e.g., audb not installed)
             return [];
         }
     }
     async getActiveDevice() {
+        const path = `${process.env.HOME}/.config/audb/current_device`;
         try {
-            const path = `${process.env.HOME}/.config/audb/current_device`;
             return await fs.readFile(path, "utf-8");
         }
-        catch {
-            throw new Error("No device selected");
+        catch (error) {
+            if (error instanceof Error && 'code' in error) {
+                const errorCode = error.code;
+                if (errorCode === 'ENOENT') {
+                    throw new Error("No device selected");
+                }
+            }
+            throw new Error(`Failed to read active device from ${path}: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     /**
@@ -115,6 +183,43 @@ export class AuroraClient {
         await this.runCommand(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
     }
     /**
+     * Performs a swipe from one coordinate to another.
+     * Compatible with AdbClient signature.
+     * @param x1 - Starting X coordinate
+     * @param y1 - Starting Y coordinate
+     * @param x2 - Ending X coordinate
+     * @param y2 - Ending Y coordinate
+     * @param durationMs - Duration in milliseconds (ignored by audb, kept for compatibility)
+     */
+    async swipe(x1, y1, x2, y2, durationMs) {
+        await this.runCommand(`audb swipe ${x1} ${y1} ${x2} ${y2}`);
+    }
+    /**
+     * Input text on Aurora device.
+     * @unimplemented - audb doesn't have direct text input support yet
+     * @todo Implement via clipboard or D-Bus when available
+     */
+    async inputText(text) {
+        console.warn(`[Aurora] inputText not implemented: "${text}"`);
+        // Placeholder - return silently or implement via clipboard in future
+    }
+    /**
+     * Get UI hierarchy from Aurora device.
+     * @unimplemented - UI scraping not available via audb yet
+     * @todo Implement when audb adds UI dump support
+     */
+    async getUiHierarchy() {
+        console.warn("[Aurora] getUiHierarchy not implemented");
+        return "<hierarchy><note>Aurora UI hierarchy not yet available via audb</note></hierarchy>";
+    }
+    /**
+     * Clear app data on Aurora device.
+     * @unimplemented - audb doesn't have this command yet
+     */
+    async clearAppData(packageName) {
+        console.warn(`[Aurora] clearAppData not implemented for ${packageName}`);
+    }
+    /**
      * Sends a keyboard key event to the device.
      * @param key - Key name to send (e.g., "Enter", "Back", "Home")
      */
@@ -128,7 +233,7 @@ export class AuroraClient {
      */
     async screenshot(options = {}) {
         const uniqueId = randomBytes(8).toString("hex");
-        const tmpFile = `/tmp/aurora_screenshot_${uniqueId}.png`;
+        const tmpFile = `${tmpdir()}/aurora_screenshot_${uniqueId}.png`;
         try {
             await this.runCommand(`audb screenshot --output "${tmpFile}"`);
             const buffer = await fs.readFile(tmpFile);
@@ -204,7 +309,8 @@ export class AuroraClient {
      * @returns Command output
      */
     async shell(command) {
-        return await this.runCommand(`audb shell ${command}`);
+        const escaped = this.escapeShellArg(command);
+        return await this.runCommand(`audb shell ${escaped}`);
     }
     /**
      * Get device logs with optional filters
@@ -224,10 +330,14 @@ export class AuroraClient {
             cmd += ` --priority ${options.priority}`;
         if (options.unit)
             cmd += ` --unit ${options.unit}`;
-        if (options.grep)
-            cmd += ` --grep '${options.grep}'`;
-        if (options.since)
-            cmd += ` --since '${options.since}'`;
+        if (options.grep) {
+            const escaped = options.grep.replace(/'/g, "'\\''");
+            cmd += ` --grep '${escaped}'`;
+        }
+        if (options.since) {
+            const escaped = options.since.replace(/'/g, "'\\''");
+            cmd += ` --since '${escaped}'`;
+        }
         return await this.runCommand(cmd);
     }
     /**
