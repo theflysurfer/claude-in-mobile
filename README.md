@@ -99,16 +99,16 @@ claude mcp add --transport stdio mobile -- cmd /c npx -y claude-in-android
 | `tap` | ✅ | ✅ | ✅ | ⚠️ | Tap at coordinates or by text (requires Python on Aurora) |
 | `long_press` | ✅ | ✅ | ✅ | ✅ | Long press gesture |
 | `swipe` | ✅ | ✅ | ✅ | ⚠️ | Swipe in direction or coordinates (requires Python on Aurora) |
-| `input_text` | ✅ | ✅ | ✅ | ❌ | Type text (not available on Aurora) |
+| `input_text` | ✅ | ✅ | ✅ | ❌ | Type text |
 | `press_key` | ✅ | ✅ | ✅ | ✅ | Press hardware buttons |
 | `launch_app` | ✅ | ✅ | ❌ | ✅ | Launch app |
 | `stop_app` | ✅ | ✅ | ❌ | ✅ | Stop app |
 | `install_app` | ✅ | ✅ | ❌ | ✅ | Install APK/.app/.rpm |
 | `list_apps` | ❌ | ❌ | ❌ | ✅ | List installed apps (Aurora only) |
-| `get_ui` | ✅ | ⚠️ | ✅ | ❌ | Get UI hierarchy (not available on Aurora) |
-| `find_element` | ✅ | ❌ | ✅ | ❌ | Find elements by text/id (not available on Aurora) |
-| `get_current_activity` | ✅ | ❌ | ❌ | ❌ | Get foreground activity (not available on Aurora) |
-| `open_url` | ✅ | ✅ | ❌ | ❌ | Open URL in browser (not yet implemented on Aurora) |
+| `get_ui` | ✅ | ⚠️ | ✅ | ❌ | Get UI hierarchy |
+| `find_element` | ✅ | ❌ | ✅ | ❌ | Find elements by text/id |
+| `get_current_activity` | ✅ | ❌ | ❌ | ❌ | Get foreground activity |
+| `open_url` | ✅ | ✅ | ❌ | ❌ | Open URL in browser |
 | `shell` | ✅ | ✅ | ❌ | ✅ | Run shell command |
 | `wait` | ✅ | ✅ | ✅ | ✅ | Wait for duration |
 | `get_logs` | ✅ | ✅ | ❌ | ✅ | Get device logs (logcat/system log) |
