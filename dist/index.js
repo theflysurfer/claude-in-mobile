@@ -635,7 +635,7 @@ async function handleTool(name, args) {
     const platform = args.platform;
     switch (name) {
         case "list_devices": {
-            const devices = await deviceManager.getDevices(platform);
+            const devices = deviceManager.getDevices(platform);
             if (devices.length === 0) {
                 return { text: "No devices connected. Make sure ADB/Xcode is running and a device/emulator/simulator is connected." };
             }
