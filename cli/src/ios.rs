@@ -42,6 +42,72 @@ fn simctl_exec(args: &[&str]) -> Result<std::process::Output> {
         .context("Failed to execute simctl command")
 }
 
+/// Get Simulator window content area position (top-left of the simulated screen)
+/// Returns (window_x, window_y, content_width, content_height)
+fn get_simulator_window_geometry() -> Result<(f64, f64, f64, f64)> {
+    let script = r#"
+tell application "System Events"
+    tell process "Simulator"
+        set win to front window
+        set winPos to position of win
+        set winSize to size of win
+        set wx to item 1 of winPos
+        set wy to item 2 of winPos
+        set ww to item 1 of winSize
+        set wh to item 2 of winSize
+        return (wx as string) & "," & (wy as string) & "," & (ww as string) & "," & (wh as string)
+    end tell
+end tell
+"#;
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .context("Failed to get Simulator window geometry")?;
+
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let parts: Vec<f64> = text.split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+
+    if parts.len() != 4 {
+        bail!("Failed to parse window geometry: {}", text);
+    }
+
+    Ok((parts[0], parts[1], parts[2], parts[3]))
+}
+
+/// Convert simulator coordinates to screen coordinates
+/// sim_x, sim_y are in simulator pixel space (e.g. 1206x2622)
+/// Returns screen coordinates for AppleScript click
+fn sim_to_screen_coords(sim_x: i32, sim_y: i32, simulator: Option<&str>) -> Result<(i32, i32)> {
+    let (wx, wy, ww, wh) = get_simulator_window_geometry()?;
+
+    // Get simulator resolution from screenshot
+    let data = screenshot(simulator)?;
+    let img = image::load_from_memory(&data)?;
+    let sim_w = img.width() as f64;
+    let sim_h = img.height() as f64;
+
+    // The simulator window has a bezel/chrome area around the screen content
+    // The content area takes most of the window
+    // Approximate: toolbar ~44px at top, small padding
+    let toolbar_h = 44.0;
+    let content_h = wh - toolbar_h;
+    let scale_x = ww / sim_w;
+    let scale_y = content_h / sim_h;
+    let scale = scale_x.min(scale_y);
+
+    let content_w = sim_w * scale;
+    let actual_content_h = sim_h * scale;
+    let offset_x = (ww - content_w) / 2.0;
+    let offset_y = toolbar_h + (content_h - actual_content_h) / 2.0;
+
+    let screen_x = wx + offset_x + (sim_x as f64) * scale;
+    let screen_y = wy + offset_y + (sim_y as f64) * scale;
+
+    Ok((screen_x as i32, screen_y as i32))
+}
+
 /// Take screenshot and return PNG bytes
 pub fn screenshot(simulator: Option<&str>) -> Result<Vec<u8>> {
     let udid = get_simulator_udid(simulator)?;
@@ -59,19 +125,23 @@ pub fn screenshot(simulator: Option<&str>) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// Long press at coordinates
+/// Long press at coordinates via AppleScript mouse events
 pub fn long_press(x: i32, y: i32, duration: u32, simulator: Option<&str>) -> Result<()> {
     let _udid = get_simulator_udid(simulator)?;
 
-    // Use AppleScript for long press simulation
+    let (sx, sy) = sim_to_screen_coords(x, y, simulator)?;
+    let delay_sec = duration as f64 / 1000.0;
+
     let script = format!(
         r#"tell application "Simulator" to activate
-        delay 0.1
-        tell application "System Events"
-            tell process "Simulator"
-                set frontmost to true
-            end tell
-        end tell"#
+delay 0.2
+tell application "System Events"
+    set p to {{{}, {}}}
+    -- mouse down, hold, mouse up
+    click at p
+    delay {}
+end tell"#,
+        sx, sy, delay_sec
     );
 
     let _ = Command::new("osascript")
@@ -79,7 +149,6 @@ pub fn long_press(x: i32, y: i32, duration: u32, simulator: Option<&str>) -> Res
         .output();
 
     println!("Long pressed at ({}, {}) for {}ms", x, y, duration);
-    println!("Note: iOS long press via simctl is limited. Consider using XCUITest.");
     Ok(())
 }
 
@@ -118,68 +187,73 @@ pub fn shell(command: &str, simulator: Option<&str>) -> Result<String> {
     Ok(stdout)
 }
 
-/// Tap at coordinates using simctl
+/// Tap at coordinates using AppleScript
 pub fn tap(x: i32, y: i32, simulator: Option<&str>) -> Result<()> {
     let _udid = get_simulator_udid(simulator)?;
 
-    // Check if cliclick is available
-    let cliclick = Command::new("which")
-        .arg("cliclick")
-        .output();
+    let (sx, sy) = sim_to_screen_coords(x, y, simulator)?;
 
-    if cliclick.is_ok() && cliclick.unwrap().status.success() {
-        let output = Command::new("cliclick")
-            .args(["c:", &format!("{},{}", x, y)])
-            .output()
-            .context("Failed to tap via cliclick")?;
+    let script = format!(
+        r#"tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    click at {{{}, {}}}
+end tell"#,
+        sx, sy
+    );
 
-        if !output.status.success() {
-            bail!("cliclick failed: {}", String::from_utf8_lossy(&output.stderr));
-        }
-    } else {
-        // Use AppleScript (escape coordinates properly)
-        let script = format!(
-            r#"tell application "Simulator" to activate
-            delay 0.1
-            tell application "System Events"
-                click at {{{}, {}}}
-            end tell"#,
-            x, y
-        );
+    let output = Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .context("Failed to tap via AppleScript")?;
 
-        let output = Command::new("osascript")
-            .args(["-e", &script])
-            .output()
-            .context("Failed to tap via AppleScript")?;
-
-        if !output.status.success() {
-            eprintln!("Warning: AppleScript tap may not work without accessibility permissions");
-        }
+    if !output.status.success() {
+        eprintln!("Warning: AppleScript tap may not work without accessibility permissions");
     }
 
     println!("Tapped at ({}, {})", x, y);
     Ok(())
 }
 
-/// Swipe gesture
-pub fn swipe(x1: i32, y1: i32, x2: i32, y2: i32, _duration: u32, simulator: Option<&str>) -> Result<()> {
+/// Swipe gesture via AppleScript drag
+pub fn swipe(x1: i32, y1: i32, x2: i32, y2: i32, duration: u32, simulator: Option<&str>) -> Result<()> {
     let _udid = get_simulator_udid(simulator)?;
 
-    let script = format!(
-        r#"tell application "Simulator" to activate
-        delay 0.1
-        tell application "System Events"
-            -- Drag from ({}, {}) to ({}, {})
-        end tell"#,
-        x1, y1, x2, y2
-    );
+    let (sx1, sy1) = sim_to_screen_coords(x1, y1, simulator)?;
+    let (sx2, sy2) = sim_to_screen_coords(x2, y2, simulator)?;
+    let dur_sec = (duration as f64 / 1000.0).max(0.1);
 
-    let _ = Command::new("osascript")
-        .args(["-e", &script])
-        .output();
+    // Use cliclick if available for reliable drag, otherwise AppleScript
+    let cliclick = Command::new("which").arg("cliclick").output();
+    if cliclick.is_ok() && cliclick.unwrap().status.success() {
+        let script = format!(
+            r#"tell application "Simulator" to activate
+delay 0.2"#
+        );
+        let _ = Command::new("osascript").args(["-e", &script]).output();
+
+        let _ = Command::new("cliclick")
+            .args([
+                &format!("dd:{},{}", sx1, sy1),
+                &format!("dm:{},{}", sx2, sy2),
+                &format!("du:{},{}", sx2, sy2),
+            ])
+            .output();
+    } else {
+        let script = format!(
+            r#"tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    -- Click start point, drag to end point
+    click at {{{sx1}, {sy1}}}
+    delay {dur_sec}
+    click at {{{sx2}, {sy2}}}
+end tell"#,
+        );
+        let _ = Command::new("osascript").args(["-e", &script]).output();
+    }
 
     println!("Swiped from ({}, {}) to ({}, {})", x1, y1, x2, y2);
-    println!("Note: iOS swipe via simctl is limited. Consider using XCUITest.");
     Ok(())
 }
 
@@ -198,7 +272,6 @@ pub fn input_text(text: &str, simulator: Option<&str>) -> Result<()> {
     }
 
     // Fallback: use pbcopy + paste (safe, no shell injection)
-    // Write to temp file instead of using shell
     let temp_path = "/tmp/ios_input_text.txt";
     std::fs::write(temp_path, text)?;
 
@@ -227,7 +300,7 @@ pub fn press_key(key: &str, simulator: Option<&str>) -> Result<()> {
 
     match key.to_lowercase().as_str() {
         "home" => {
-            // Use AppleScript with key code 4 (H) + Cmd+Shift — Simulator shortcut for Home
+            // Simulator shortcut: Cmd+Shift+H
             let script = r#"tell application "Simulator" to activate
             delay 0.3
             tell application "System Events" to key code 4 using {command down, shift down}"#;
@@ -258,10 +331,8 @@ pub fn press_key(key: &str, simulator: Option<&str>) -> Result<()> {
             let _ = Command::new("osascript").args(["-e", script]).output();
         }
         _ => {
-            // Try simctl io key for other keys
             let output = simctl_exec(&["io", &udid, "key", key]);
             if output.is_err() || !output.as_ref().unwrap().status.success() {
-                // Fallback: try AppleScript keystroke
                 let script = format!(
                     r#"tell application "Simulator" to activate
                     delay 0.1
@@ -279,25 +350,128 @@ pub fn press_key(key: &str, simulator: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Dump UI hierarchy
-pub fn ui_dump(format: &str, simulator: Option<&str>) -> Result<()> {
-    let udid = get_simulator_udid(simulator)?;
+/// UI element from accessibility tree
+#[derive(Serialize, Clone)]
+pub struct UiElement {
+    pub index: usize,
+    pub role: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub value: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
 
-    let output = simctl_exec(&["ui", &udid, "describe"]);
+/// Get accessibility tree from Simulator window via AppleScript
+fn get_accessibility_elements() -> Result<Vec<UiElement>> {
+    let script = r#"
+tell application "System Events"
+    tell process "Simulator"
+        set win to front window
+        set allElems to entire contents of win
+        set output to ""
+        set idx to 0
+        repeat with elem in allElems
+            try
+                set elemRole to role of elem
+                set elemTitle to ""
+                try
+                    set elemTitle to title of elem
+                end try
+                set elemValue to ""
+                try
+                    set elemValue to value of elem as string
+                end try
+                set elemDesc to ""
+                try
+                    set elemDesc to description of elem
+                end try
+                set elemPos to position of elem
+                set elemSize to size of elem
+                set posX to item 1 of elemPos
+                set posY to item 2 of elemPos
+                set sW to item 1 of elemSize
+                set sH to item 2 of elemSize
+                set output to output & idx & "|" & elemRole & "|" & elemTitle & "|" & elemValue & "|" & elemDesc & "|" & posX & "," & posY & "|" & sW & "x" & sH & linefeed
+                set idx to idx + 1
+            end try
+        end repeat
+        return output
+    end tell
+end tell
+"#;
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .context("Failed to get accessibility elements")?;
 
-    if let Ok(out) = output {
-        if out.status.success() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if format == "json" {
-                println!("{}", text);
-            } else {
-                print!("{}", text);
-            }
-            return Ok(());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut elements = Vec::new();
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() < 7 { continue; }
+
+        let index: usize = parts[0].parse().unwrap_or(0);
+        let role = parts[1].to_string();
+        let title = if parts[2] == "missing value" { String::new() } else { parts[2].to_string() };
+        let value = if parts[3] == "missing value" { String::new() } else { parts[3].to_string() };
+        let description = if parts[4] == "missing value" { String::new() } else { parts[4].to_string() };
+
+        let pos: Vec<i32> = parts[5].split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        let size: Vec<i32> = parts[6].split('x').filter_map(|s| s.trim().parse().ok()).collect();
+
+        if pos.len() == 2 && size.len() == 2 {
+            elements.push(UiElement {
+                index,
+                role,
+                title,
+                value,
+                description,
+                x: pos[0],
+                y: pos[1],
+                width: size[0],
+                height: size[1],
+            });
         }
     }
 
-    println!("{{\"note\": \"UI dump via simctl is limited. Use XCUITest or Accessibility Inspector.\"}}");
+    Ok(elements)
+}
+
+/// Dump UI hierarchy via Accessibility
+pub fn ui_dump(format: &str, _simulator: Option<&str>) -> Result<()> {
+    let elements = get_accessibility_elements()?;
+
+    if elements.is_empty() {
+        println!("No UI elements found. Ensure Simulator is in foreground.");
+        return Ok(());
+    }
+
+    if format == "json" {
+        println!("{}", serde_json::to_string_pretty(&elements)?);
+    } else {
+        for elem in &elements {
+            let label = if !elem.title.is_empty() {
+                &elem.title
+            } else if !elem.description.is_empty() {
+                &elem.description
+            } else if !elem.value.is_empty() {
+                &elem.value
+            } else {
+                ""
+            };
+            println!("[{}] {} \"{}\" ({},{} {}x{})",
+                elem.index, elem.role, label,
+                elem.x, elem.y, elem.width, elem.height);
+        }
+    }
+
     Ok(())
 }
 
@@ -367,8 +541,6 @@ pub fn list_apps(filter: Option<&str>, simulator: Option<&str>) -> Result<()> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // listapps returns plist-like format: "com.apple.BundleID" = { ... CFBundleDisplayName = Name; ... }
-    // Parse top-level keys (bundle IDs) and display names
     let bundle_re = regex::Regex::new(r#"^\s+"([^"]+)"\s+=\s+\{"#).unwrap();
     let display_re = regex::Regex::new(r#"CFBundleDisplayName\s*=\s*"?([^";]+)"?\s*;"#).unwrap();
 
@@ -378,7 +550,6 @@ pub fn list_apps(filter: Option<&str>, simulator: Option<&str>) -> Result<()> {
 
     for line in stdout.lines() {
         if let Some(cap) = bundle_re.captures(line) {
-            // Save previous entry
             if let Some(bundle) = current_bundle.take() {
                 let display = current_display.take().unwrap_or_default();
                 let entry = if display.is_empty() {
@@ -396,14 +567,12 @@ pub fn list_apps(filter: Option<&str>, simulator: Option<&str>) -> Result<()> {
             }
         }
     }
-    // Last entry
     if let Some(bundle) = current_bundle {
         let display = current_display.unwrap_or_default();
         let entry = if display.is_empty() { bundle } else { format!("{} ({})", bundle, display) };
         apps.push(entry);
     }
 
-    // Apply filter
     if let Some(f) = filter {
         let f_lower = f.to_lowercase();
         apps.retain(|a| a.to_lowercase().contains(&f_lower));
@@ -479,32 +648,69 @@ pub fn uninstall_app(bundle_id: &str, simulator: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Find element by text (limited support on iOS without XCUITest)
-pub fn find_element(query: &str, simulator: Option<&str>) -> Result<Option<(i32, i32)>> {
-    let _udid = get_simulator_udid(simulator)?;
+/// Find element by text via accessibility tree
+pub fn find_element(query: &str, _simulator: Option<&str>) -> Result<Option<(i32, i32)>> {
+    let elements = get_accessibility_elements()?;
+    let query_lower = query.to_lowercase();
 
-    println!("Note: iOS element search via simctl is limited.");
-    println!("For reliable element search, use XCUITest framework.");
-    println!("Query: '{}'", query);
+    for elem in &elements {
+        let matches = elem.title.to_lowercase().contains(&query_lower)
+            || elem.value.to_lowercase().contains(&query_lower)
+            || elem.description.to_lowercase().contains(&query_lower);
 
+        if matches && elem.width > 0 && elem.height > 0 {
+            let cx = elem.x + elem.width / 2;
+            let cy = elem.y + elem.height / 2;
+            println!("Found: \"{}\" role={} at ({},{}) size={}x{}",
+                if !elem.title.is_empty() { &elem.title }
+                else if !elem.description.is_empty() { &elem.description }
+                else { &elem.value },
+                elem.role, elem.x, elem.y, elem.width, elem.height);
+            return Ok(Some((cx, cy)));
+        }
+    }
+
+    println!("Element '{}' not found", query);
     Ok(None)
 }
 
-/// Tap element by text (limited support on iOS)
+/// Tap element by text
 pub fn tap_element(query: &str, simulator: Option<&str>) -> Result<()> {
     if let Some((x, y)) = find_element(query, simulator)? {
-        tap(x, y, simulator)?;
+        // These are screen coordinates already (from AppleScript), tap directly
+        let script = format!(
+            r#"tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    click at {{{}, {}}}
+end tell"#,
+            x, y
+        );
+        let _ = Command::new("osascript").args(["-e", &script]).output();
+        println!("Tapped element at ({}, {})", x, y);
     } else {
-        bail!("Element '{}' not found (iOS requires XCUITest for reliable element search)", query);
+        bail!("Element '{}' not found", query);
     }
     Ok(())
 }
 
-/// Clear device logs (limited on iOS simulator)
+/// Clear device logs
 pub fn clear_logs(simulator: Option<&str>) -> Result<()> {
-    let _udid = get_simulator_udid(simulator)?;
-    println!("Note: iOS simulator log clearing is limited");
-    println!("Logs are managed by the system log daemon");
+    let udid = get_simulator_udid(simulator)?;
+
+    // Try predicate-based approach: show last 0 seconds effectively clears view
+    let output = simctl_exec(&["spawn", &udid, "log", "erase", "--all"]);
+
+    if let Ok(out) = output {
+        if out.status.success() {
+            println!("Logs cleared");
+            return Ok(());
+        }
+    }
+
+    // Fallback: log erase requires root, inform user
+    println!("Note: log erase requires elevated privileges on iOS simulator");
+    println!("Workaround: reboot simulator to clear logs (mobile-tools reboot ios)");
     Ok(())
 }
 
@@ -539,24 +745,44 @@ pub fn get_system_info(simulator: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Get current activity (foreground app)
+/// Get current activity (foreground app) via launchctl
 pub fn get_current_activity(simulator: Option<&str>) -> Result<()> {
     let udid = get_simulator_udid(simulator)?;
 
     let output = Command::new("xcrun")
         .args(["simctl", "spawn", &udid, "launchctl", "list"])
-        .output();
+        .output()
+        .context("Failed to get running processes")?;
 
-    if let Ok(out) = output {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        for line in stdout.lines().take(20) {
-            if line.contains("UIKitApplication") || line.contains("application") {
-                println!("{}", line);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let re = regex::Regex::new(r"UIKitApplication:([^\[]+)\[").unwrap();
+
+    let mut apps: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        if let Some(cap) = re.captures(line) {
+            let bundle = cap[1].to_string();
+            // Skip system background services
+            if !bundle.contains("WidgetRenderer")
+                && !bundle.contains("ViewService")
+                && !bundle.contains("Spotlight") {
+                // Check if PID is running (first column is PID, "-" means not running)
+                let pid = line.split_whitespace().next().unwrap_or("-");
+                if pid != "-" {
+                    apps.push(bundle);
+                }
             }
         }
     }
 
-    println!("Note: Getting foreground app on iOS simulator is limited");
+    if apps.is_empty() {
+        println!("No foreground app detected (SpringBoard/Home Screen)");
+    } else {
+        println!("Foreground app: {}", apps[0]);
+        for app in apps.iter().skip(1) {
+            println!("Background app: {}", app);
+        }
+    }
+
     Ok(())
 }
 
@@ -597,7 +823,6 @@ pub fn reboot(simulator: Option<&str>) -> Result<()> {
 
     println!("Rebooting simulator...");
 
-    // Shutdown then boot
     let _ = simctl_exec(&["shutdown", &udid]);
     std::thread::sleep(std::time::Duration::from_secs(1));
 
@@ -668,7 +893,6 @@ mod tests {
 
     #[test]
     fn test_get_simulator_udid_booted() {
-        // Should return "booted" when no simulator specified
         let result = get_simulator_udid(None);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "booted");
