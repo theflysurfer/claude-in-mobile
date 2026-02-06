@@ -26,7 +26,7 @@ claude mcp add --transport stdio mobile -- npx -y claude-in-mobile
 To add globally (available in all projects):
 
 ```bash
-claude mcp add --scope user --transport stdio mobile -- npx -y claude-in-android
+claude mcp add --scope user --transport stdio mobile -- npx -y claude-in-mobile
 ```
 
 ### From npm
@@ -64,7 +64,7 @@ Add to your Claude Code settings (`~/.claude.json` or project settings):
 ### Windows
 
 ```bash
-claude mcp add --transport stdio mobile -- cmd /c npx -y claude-in-android
+claude mcp add --transport stdio mobile -- cmd /c npx -y claude-in-mobile
 ```
 
 ## Requirements
@@ -243,7 +243,7 @@ claude-in-mobile ui-dump android | grep "Welcome" && echo "PASS" || echo "FAIL"
 
 ```bash
 claude plugin marketplace add AlexGladkov/claude-in-mobile
-claude plugin install claude-in-mobile@AlexGladkov-claude-in-mobile
+claude plugin install claude-in-mobile@claude-in-mobile
 ```
 
 After installing, Claude Code controls devices with natural language. The skill loads into context only on demand — no token overhead when not in use.
