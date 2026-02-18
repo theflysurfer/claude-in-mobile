@@ -6,11 +6,9 @@ export interface CompressOptions {
     maxSizeBytes?: number;
 }
 /**
- * Compress PNG image buffer
- * - Resize if larger than max dimensions
- * - Convert to JPEG with specified quality
- * - Iteratively reduce quality if still too large
- * Returns base64 encoded JPEG
+ * Compress PNG screenshot to WebP greyscale using sharp.
+ * WebP is ~30-50% smaller than JPEG for UI content (flat colors, text).
+ * Greyscale removes color info unnecessary for UI automation.
  */
 export declare function compressScreenshot(pngBuffer: Buffer, options?: CompressOptions): Promise<{
     data: string;

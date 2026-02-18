@@ -1,9 +1,9 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ListToolsRequestSchema, CallToolRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema, CallToolRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { tools, handleTool } from './tool-handlers.js';
-import { getMetaToolDefinition, executeMetaAction } from './meta-tool.js';
+import { getMetaToolDefinition, getSearchToolDefinition, executeMetaAction, executeSearch } from './meta-tool.js';
 export class MobileMcpServer {
     config;
     useMetaMode;
@@ -100,18 +100,24 @@ export class MobileMcpServer {
      * Create a new Server instance with handlers configured.
      */
     createServer() {
-        const server = new Server({ name: 'claude-mobile', version: '2.11.0' }, { capabilities: { tools: {} } });
-        // List tools
+        const server = new Server({ name: 'mobile', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
+        // ── List tools ──
         server.setRequestHandler(ListToolsRequestSchema, async () => {
             if (this.useMetaMode) {
-                return { tools: [getMetaToolDefinition()] };
+                return { tools: [getMetaToolDefinition(), getSearchToolDefinition()] };
             }
             return { tools };
         });
-        // Call tool
+        // ── Call tool ──
         server.setRequestHandler(CallToolRequestSchema, async (request) => {
             const { name, arguments: args } = request.params;
             try {
+                // Handle mobile_search tool
+                if (name === 'mobile_search') {
+                    const query = args?.query || '';
+                    const result = executeSearch(query);
+                    return { content: [{ type: 'text', text: result }] };
+                }
                 let result;
                 if (this.useMetaMode || name === 'mobile') {
                     result = await executeMetaAction((args || {}), handleTool);
@@ -143,6 +149,65 @@ export class MobileMcpServer {
                 return {
                     content: [{ type: 'text', text: `Error: ${error.message}` }],
                     isError: true,
+                };
+            }
+        });
+        // ── List resources ──
+        server.setRequestHandler(ListResourcesRequestSchema, async () => {
+            return {
+                resources: [
+                    {
+                        uri: 'mobile://logs',
+                        name: 'Device logs',
+                        description: 'Recent device logs (can be dropped from context after reading)',
+                        mimeType: 'text/plain',
+                    },
+                    {
+                        uri: 'mobile://ui',
+                        name: 'UI tree',
+                        description: 'Current UI hierarchy in compact format (droppable context)',
+                        mimeType: 'text/plain',
+                    },
+                    {
+                        uri: 'mobile://info',
+                        name: 'System info',
+                        description: 'Device battery, memory, current activity',
+                        mimeType: 'text/plain',
+                    },
+                ],
+            };
+        });
+        // ── Read resource ──
+        server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+            const { uri } = request.params;
+            try {
+                let text = '';
+                switch (uri) {
+                    case 'mobile://logs': {
+                        const result = await handleTool('get_logs', { lines: 50 });
+                        text = result.text;
+                        break;
+                    }
+                    case 'mobile://ui': {
+                        const result = await handleTool('get_ui', {});
+                        text = result.text;
+                        break;
+                    }
+                    case 'mobile://info': {
+                        const result = await handleTool('get_system_info', {});
+                        text = result.text;
+                        break;
+                    }
+                    default:
+                        throw new Error(`Unknown resource: ${uri}`);
+                }
+                return {
+                    contents: [{ uri, text, mimeType: 'text/plain' }],
+                };
+            }
+            catch (error) {
+                return {
+                    contents: [{ uri, text: `Error: ${error.message}`, mimeType: 'text/plain' }],
                 };
             }
         });

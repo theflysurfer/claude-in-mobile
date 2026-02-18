@@ -1,12 +1,12 @@
 /**
  * Meta-tool pattern for Mobile MCP Server.
- * Exposes a single "mobile" tool instead of 40+ individual tools,
- * reducing token usage from ~15-20k to ~2-3k.
+ * - Single "mobile" tool with action dispatch
+ * - "mobile_search" for action discovery (Dynamic Toolset pattern)
+ * - Platform-aware descriptions (filters irrelevant sections)
  */
 import type { handleTool as HandleToolFn } from './tool-handlers.js';
 /**
- * Returns the MCP tool definition for the single "mobile" meta-tool.
- * Telegraphic description to minimize token usage (~800 tokens vs ~1500).
+ * Main mobile tool - dynamically filtered by active platform.
  */
 export declare function getMetaToolDefinition(): {
     name: string;
@@ -27,6 +27,28 @@ export declare function getMetaToolDefinition(): {
         additionalProperties: boolean;
     };
 };
+/**
+ * Search/describe tool - Dynamic Toolset pattern.
+ * LLM queries this to get detailed params for specific actions.
+ */
+export declare function getSearchToolDefinition(): {
+    name: string;
+    description: string;
+    inputSchema: {
+        type: "object";
+        properties: {
+            query: {
+                type: string;
+                description: string;
+            };
+        };
+        required: string[];
+    };
+};
+/**
+ * Execute search: find matching actions or describe specific ones.
+ */
+export declare function executeSearch(query: string): string;
 /**
  * Route a meta-tool call to the appropriate internal tool handler.
  */
