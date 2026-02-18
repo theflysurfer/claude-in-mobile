@@ -1,9 +1,42 @@
 import { execSync, exec, execFile } from "child_process";
+import { existsSync } from "fs";
+import { join } from "path";
 import { promisify } from "util";
 import { classifyAdbError } from "../errors.js";
 
 const execAsyncCmd = promisify(exec);
 const execFileAsync = promisify(execFile);
+
+/**
+ * Resolve ADB binary path from environment variables.
+ * Priority: ADB_PATH env > ANDROID_HOME/platform-tools/adb > bare "adb" (PATH fallback)
+ */
+function resolveAdbPath(): string {
+  // 1. Explicit ADB_PATH env var (set by MetaMcp servers.json)
+  const adbPath = process.env.ADB_PATH;
+  if (adbPath && existsSync(adbPath)) {
+    return `"${adbPath}"`;
+  }
+
+  // 2. ANDROID_HOME/platform-tools/adb
+  const androidHome = process.env.ANDROID_HOME;
+  if (androidHome) {
+    const candidates = [
+      join(androidHome, "platform-tools", "adb.exe"),
+      join(androidHome, "platform-tools", "adb"),
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        return `"${candidate}"`;
+      }
+    }
+  }
+
+  // 3. Fallback to bare "adb" (relies on system PATH)
+  return "adb";
+}
+
+const ADB = resolveAdbPath();
 
 export interface Device {
   id: string;
@@ -26,7 +59,7 @@ export class AdbClient {
    * Execute ADB command and return stdout as string
    */
   exec(command: string): string {
-    const fullCommand = `adb ${this.deviceFlag} ${command}`;
+    const fullCommand = `${ADB} ${this.deviceFlag} ${command}`;
     try {
       return execSync(fullCommand, {
         encoding: "utf-8",
@@ -41,7 +74,7 @@ export class AdbClient {
    * Execute ADB command and return raw bytes (for screenshots)
    */
   execRaw(command: string): Buffer {
-    const fullCommand = `adb ${this.deviceFlag} ${command}`;
+    const fullCommand = `${ADB} ${this.deviceFlag} ${command}`;
     try {
       return execSync(fullCommand, {
         maxBuffer: 50 * 1024 * 1024
@@ -55,7 +88,7 @@ export class AdbClient {
    * Execute ADB command async (non-blocking)
    */
   async execAsync(command: string): Promise<string> {
-    const fullCommand = `adb ${this.deviceFlag} ${command}`;
+    const fullCommand = `${ADB} ${this.deviceFlag} ${command}`;
     try {
       const { stdout } = await execAsyncCmd(fullCommand, {
         maxBuffer: 50 * 1024 * 1024
@@ -74,13 +107,14 @@ export class AdbClient {
       ? ["-s", this.deviceId, ...command.split(/\s+/)]
       : command.split(/\s+/);
     try {
-      const { stdout } = await execFileAsync("adb", args, {
+      const adbBin = ADB.startsWith('"') ? ADB.slice(1, -1) : ADB;
+      const { stdout } = await execFileAsync(adbBin, args, {
         maxBuffer: 50 * 1024 * 1024,
         encoding: "buffer" as any,
       });
       return stdout as unknown as Buffer;
     } catch (error: any) {
-      throw classifyAdbError(error.stderr?.toString() ?? error.message, `adb ${args.join(" ")}`);
+      throw classifyAdbError(error.stderr?.toString() ?? error.message, `${ADB} ${args.join(" ")}`);
     }
   }
 
@@ -88,7 +122,7 @@ export class AdbClient {
    * Get list of connected devices
    */
   getDevices(): Device[] {
-    const output = execSync("adb devices -l", { encoding: "utf-8" });
+    const output = execSync(`${ADB} devices -l`, { encoding: "utf-8" });
     const lines = output.split("\n").slice(1); // Skip header
 
     return lines
@@ -494,14 +528,14 @@ export class AdbClient {
    */
   connectWifi(ip: string, port: number): string {
     try {
-      return execSync(`adb connect ${ip}:${port}`, {
+      return execSync(`${ADB} connect ${ip}:${port}`, {
         encoding: "utf-8",
         timeout: 10000,
       }).trim();
     } catch (error: any) {
       throw classifyAdbError(
         error.stderr?.toString() ?? error.message,
-        `adb connect ${ip}:${port}`,
+        `${ADB} connect ${ip}:${port}`,
       );
     }
   }
@@ -511,14 +545,14 @@ export class AdbClient {
    */
   pairWifi(ip: string, port: number, code: string): string {
     try {
-      return execSync(`adb pair ${ip}:${port} ${code}`, {
+      return execSync(`${ADB} pair ${ip}:${port} ${code}`, {
         encoding: "utf-8",
         timeout: 15000,
       }).trim();
     } catch (error: any) {
       throw classifyAdbError(
         error.stderr?.toString() ?? error.message,
-        `adb pair ${ip}:${port}`,
+        `${ADB} pair ${ip}:${port}`,
       );
     }
   }
@@ -530,14 +564,14 @@ export class AdbClient {
   disconnectWifi(ip?: string, port?: number): string {
     const target = ip && port ? ` ${ip}:${port}` : "";
     try {
-      return execSync(`adb disconnect${target}`, {
+      return execSync(`${ADB} disconnect${target}`, {
         encoding: "utf-8",
         timeout: 5000,
       }).trim();
     } catch (error: any) {
       throw classifyAdbError(
         error.stderr?.toString() ?? error.message,
-        `adb disconnect${target}`,
+        `${ADB} disconnect${target}`,
       );
     }
   }
