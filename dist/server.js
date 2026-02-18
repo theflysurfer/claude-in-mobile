@@ -1,6 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { tools, handleTool } from './tool-handlers.js';
 import { getMetaToolDefinition, getSearchToolDefinition, executeMetaAction, executeSearch } from './meta-tool.js';
@@ -12,7 +13,10 @@ export class MobileMcpServer {
         this.useMetaMode = config.metaMode;
     }
     async run() {
-        if (this.config.transport === 'http') {
+        if (this.config.transport === 'sse') {
+            await this.runSse();
+        }
+        else if (this.config.transport === 'http') {
             await this.runHttp();
         }
         else {
@@ -95,6 +99,68 @@ export class MobileMcpServer {
         });
         process.on('SIGINT', () => process.exit(0));
         process.on('SIGTERM', () => process.exit(0));
+    }
+    async runSse() {
+        const express = (await import('express')).default;
+        const host = this.config.httpHost;
+        const port = this.config.httpPort;
+        const app = express();
+        app.use(express.json());
+        // Stateful: one server + transport per SSE session
+        const sessions = new Map();
+        // GET /sse - Client establishes SSE stream
+        app.get('/sse', async (req, res) => {
+            const server = this.createServer();
+            const transport = new SSEServerTransport('/messages', res);
+            sessions.set(transport.sessionId, { server, transport });
+            res.on('close', () => {
+                sessions.delete(transport.sessionId);
+                server.close();
+            });
+            await server.connect(transport);
+        });
+        // POST /messages?sessionId=xxx - Client sends JSON-RPC messages
+        app.post('/messages', async (req, res) => {
+            const sessionId = req.query.sessionId;
+            const session = sessions.get(sessionId);
+            if (!session) {
+                res.status(400).json({
+                    jsonrpc: '2.0',
+                    error: { code: -32000, message: 'Invalid or expired session. Reconnect via GET /sse.' },
+                    id: null,
+                });
+                return;
+            }
+            await session.transport.handlePostMessage(req, res, req.body);
+        });
+        // Health check
+        app.get('/health', (_req, res) => {
+            res.json({
+                status: 'ok',
+                server: 'mobile-mcp-server',
+                version: '2.11.0',
+                metaMode: this.useMetaMode,
+                transport: 'sse',
+                activeSessions: sessions.size,
+            });
+        });
+        app.listen(port, host, () => {
+            console.error(`Mobile MCP Server running on http://${host}:${port}/sse`);
+            this.logStartup();
+            console.error(`  SSE: GET http://${host}:${port}/sse`);
+            console.error(`  Messages: POST http://${host}:${port}/messages?sessionId=<id>`);
+            console.error(`  Health: http://${host}:${port}/health`);
+        });
+        const shutdown = async () => {
+            for (const [id, session] of sessions) {
+                await session.transport.close();
+                await session.server.close();
+                sessions.delete(id);
+            }
+            process.exit(0);
+        };
+        process.on('SIGINT', shutdown);
+        process.on('SIGTERM', shutdown);
     }
     /**
      * Create a new Server instance with handlers configured.
@@ -218,6 +284,9 @@ export class MobileMcpServer {
         console.error(`  Transport: ${this.config.transport}`);
         if (this.config.transport === 'http') {
             console.error(`  URL: http://${this.config.httpHost}:${this.config.httpPort}/mcp`);
+        }
+        else if (this.config.transport === 'sse') {
+            console.error(`  URL: http://${this.config.httpHost}:${this.config.httpPort}/sse`);
         }
     }
 }

@@ -13,14 +13,14 @@ program
   .version('2.11.0')
   .option(
     '--transport <type>',
-    'Transport: stdio (default) or http',
+    'Transport: stdio (default), http (StreamableHTTP), or sse',
     'stdio',
   )
   .option('--port <number>', 'HTTP port (default: 3100)', '3100')
   .option('--host <address>', 'HTTP host (default: 127.0.0.1)', '127.0.0.1')
   .option('--no-meta', 'Disable meta-tool mode (expose individual tools)')
   .action(async (options) => {
-    const transport = options.transport as 'stdio' | 'http';
+    const transport = options.transport as 'stdio' | 'http' | 'sse';
     const metaMode = options.meta !== false;
     const httpPort = parseInt(options.port as string, 10);
     const httpHost = options.host as string;
@@ -31,7 +31,9 @@ program
     console.error(`  ${chalk.white('Transport:')} ${chalk.green(transport)}${transport === 'http' ? chalk.gray(` (${httpHost}:${httpPort})`) : ''}`);
     console.error(`  ${chalk.white('Meta-tool:')} ${metaMode ? chalk.green('ON (single "mobile" tool)') : chalk.yellow('OFF (individual tools)')}`);
     if (transport === 'http') {
-      console.error(`  ${chalk.white('MetaMcp:')}   ${chalk.cyan(`http://${httpHost}:${httpPort}/mcp`)}`);
+      console.error(`  ${chalk.white('Endpoint:')} ${chalk.cyan(`http://${httpHost}:${httpPort}/mcp`)}`);
+    } else if (transport === 'sse') {
+      console.error(`  ${chalk.white('SSE:')}      ${chalk.cyan(`http://${httpHost}:${httpPort}/sse`)}`);
     }
     console.error(chalk.gray('  ─────────────────────────────\n'));
 

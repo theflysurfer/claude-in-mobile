@@ -1,5 +1,5 @@
 export interface ServerConfig {
-    transport: 'stdio' | 'http';
+    transport: 'stdio' | 'http' | 'sse';
     metaMode: boolean;
     httpPort: number;
     httpHost: string;
@@ -11,6 +11,7 @@ export declare class MobileMcpServer {
     run(): Promise<void>;
     private runStdio;
     private runHttp;
+    private runSse;
     /**
      * Create a new Server instance with handlers configured.
      */
