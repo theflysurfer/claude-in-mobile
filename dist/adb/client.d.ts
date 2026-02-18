@@ -31,6 +31,7 @@ export declare class AdbClient {
      * Set active device
      */
     setDevice(deviceId: string): void;
+    getDeviceId(): string | undefined;
     /**
      * Take screenshot and return raw PNG buffer
      */

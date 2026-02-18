@@ -114,6 +114,10 @@ export class AdbClient {
     this.deviceId = deviceId;
   }
 
+  getDeviceId(): string | undefined {
+    return this.deviceId;
+  }
+
   /**
    * Take screenshot and return raw PNG buffer
    */

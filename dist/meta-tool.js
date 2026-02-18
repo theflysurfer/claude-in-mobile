@@ -62,6 +62,8 @@ const ACTION_MAP = {
     'connect_wifi': 'connect_wifi',
     'pair_wifi': 'pair_wifi',
     'disconnect_wifi': 'disconnect_wifi',
+    'keep_awake': 'keep_awake',
+    'stay_awake': 'keep_awake',
     // ===== DESKTOP =====
     'launch_desktop_app': 'launch_desktop_app',
     'stop_desktop_app': 'stop_desktop_app',
@@ -123,6 +125,7 @@ const ACTION_META = {
     connect_wifi: { params: 'ip:string, port:int', category: 'wifi', platforms: ['android'] },
     pair_wifi: { params: 'ip:string, port:int, code:string(6-digit)', category: 'wifi', platforms: ['android'] },
     disconnect_wifi: { params: 'ip?:string, port?:int', category: 'wifi', platforms: ['android'] },
+    keep_awake: { params: 'enabled?:bool(default true), mode?:usb|wifi|all(auto-detect)', category: 'wifi', platforms: ['android'], aliases: ['stay_awake'] },
     // Desktop
     launch_desktop_app: { params: 'projectPath?:string', category: 'desktop', platforms: ['desktop'] },
     stop_desktop_app: { params: '(none)', category: 'desktop', platforms: ['desktop'] },
@@ -150,7 +153,7 @@ const SECTION_LINES = {
     permission: 'PERM: grant_permission(package,perm), revoke_permission, reset_permissions',
     debug: 'DEBUG: get_logs(level?,tag?,lines?,package?), clear_logs, get_system_info, shell(command)',
     reliability: 'WAIT: wait(ms?), wait_for_element(text?,timeout?), assert_visible, assert_not_exists, batch_commands',
-    wifi: 'WIFI[android]: connect_wifi(ip,port), pair_wifi(ip,port,code), disconnect_wifi',
+    wifi: 'WIFI[android]: connect_wifi(ip,port), pair_wifi(ip,port,code), disconnect_wifi, keep_awake(enabled?,mode?)',
     desktop: 'DESKTOP: launch_desktop_app, get_window_info, focus_window, resize_window, get/set_clipboard',
     files: 'FILES[aurora]: push_file(local,remote), pull_file(remote,local)',
 };

@@ -896,6 +896,25 @@ export const tools: Tool[] = [
       },
     },
   },
+  {
+    name: "keep_awake",
+    description: "Keep device screen on and awake during debugging. Supports both USB and WiFi ADB modes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        enabled: {
+          type: "boolean",
+          description: "true = keep screen on, false = restore normal behavior",
+          default: true,
+        },
+        mode: {
+          type: "string",
+          enum: ["usb", "wifi", "all"],
+          description: "usb: stay on while USB connected. wifi/all: stay on always (needed for wireless debug). Default: auto-detect from device connection.",
+        },
+      },
+    },
+  },
 ];
 
 // Per-platform cache for UI elements (to support tap by index)
@@ -1898,6 +1917,36 @@ export async function handleTool(name: string, args: Record<string, unknown>): P
       const port = args.port as number | undefined;
       const result = deviceManager.getAndroidClient().disconnectWifi(ip, port);
       return { text: result || "Disconnected" };
+    }
+
+    case "keep_awake": {
+      const enabled = (args.enabled as boolean) ?? true;
+      const adb = deviceManager.getAndroidClient();
+
+      if (!enabled) {
+        // Restore normal behavior
+        adb.shell("svc power stayon false");
+        return { text: "Screen stay-awake disabled. Normal screen timeout restored." };
+      }
+
+      // Determine mode: auto-detect if not specified
+      let mode = args.mode as string | undefined;
+      if (!mode) {
+        // Auto-detect: if device ID contains an IP, it's WiFi ADB
+        const deviceId = adb.getDeviceId();
+        mode = deviceId && /^\d+\.\d+\.\d+\.\d+/.test(deviceId) ? "wifi" : "usb";
+      }
+
+      if (mode === "usb") {
+        // Stay on while USB connected (value 2 = USB)
+        adb.shell("settings put global stay_on_while_plugged_in 2");
+        adb.shell("svc power stayon usb");
+        return { text: "Screen stay-awake ON (USB mode). Screen stays on while USB is connected." };
+      } else {
+        // WiFi or all: stay on always (no USB to detect)
+        adb.shell("svc power stayon true");
+        return { text: `Screen stay-awake ON (${mode} mode). Screen stays on unconditionally. Don't forget to disable when done!` };
+      }
     }
 
     default:
