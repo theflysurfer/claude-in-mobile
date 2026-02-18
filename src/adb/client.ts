@@ -481,4 +481,60 @@ export class AdbClient {
   getCpuInfo(): string {
     return this.exec("shell top -n 1 | head -20");
   }
+
+  // ============ WiFi ADB ============
+
+  /**
+   * Connect to a device over WiFi ADB.
+   * Note: WiFi commands are global (no -s flag needed).
+   */
+  connectWifi(ip: string, port: number): string {
+    try {
+      return execSync(`adb connect ${ip}:${port}`, {
+        encoding: "utf-8",
+        timeout: 10000,
+      }).trim();
+    } catch (error: any) {
+      throw classifyAdbError(
+        error.stderr?.toString() ?? error.message,
+        `adb connect ${ip}:${port}`,
+      );
+    }
+  }
+
+  /**
+   * Pair with a device over WiFi ADB (Android 11+).
+   */
+  pairWifi(ip: string, port: number, code: string): string {
+    try {
+      return execSync(`adb pair ${ip}:${port} ${code}`, {
+        encoding: "utf-8",
+        timeout: 15000,
+      }).trim();
+    } catch (error: any) {
+      throw classifyAdbError(
+        error.stderr?.toString() ?? error.message,
+        `adb pair ${ip}:${port}`,
+      );
+    }
+  }
+
+  /**
+   * Disconnect from a WiFi ADB device.
+   * If no ip/port given, disconnects all WiFi devices.
+   */
+  disconnectWifi(ip?: string, port?: number): string {
+    const target = ip && port ? ` ${ip}:${port}` : "";
+    try {
+      return execSync(`adb disconnect${target}`, {
+        encoding: "utf-8",
+        timeout: 5000,
+      }).trim();
+    } catch (error: any) {
+      throw classifyAdbError(
+        error.stderr?.toString() ?? error.message,
+        `adb disconnect${target}`,
+      );
+    }
+  }
 }

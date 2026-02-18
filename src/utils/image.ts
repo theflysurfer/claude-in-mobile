@@ -9,9 +9,9 @@ export interface CompressOptions {
 }
 
 const DEFAULT_OPTIONS: CompressOptions = {
-  maxWidth: 800,    // Safe for API limit of 2000px
-  maxHeight: 1400,  // Safe for API limit of 2000px
-  quality: 70,
+  maxWidth: 500,    // Reduced from 800 for token savings (~50% smaller base64)
+  maxHeight: 900,   // Reduced from 1400, maintains phone aspect ratio
+  quality: 65,      // Reduced from 70, sufficient for OCR/Vision
   maxSizeBytes: 1024 * 1024, // 1MB max for base64 (safe margin for API)
 };
 
@@ -49,6 +49,10 @@ export async function compressScreenshot(
   if (newWidth !== width || newHeight !== height) {
     image.resize({ w: newWidth, h: newHeight });
   }
+
+  // Convert to grayscale - UI automation doesn't need color,
+  // reduces entropy and file size by ~30-40%
+  image.greyscale();
 
   // Convert to JPEG with iterative quality reduction if needed
   let quality = opts.quality!;

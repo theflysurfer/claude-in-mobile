@@ -163,47 +163,64 @@ export function findElements(
   });
 }
 
+/** Short class name map for common Android widgets */
+const CLASS_SHORT: Record<string, string> = {
+  Button: 'Btn', TextView: 'Txt', ImageView: 'Img', EditText: 'Edt',
+  ImageButton: 'IBtn', CheckBox: 'Chk', Switch: 'Sw', RadioButton: 'Rad',
+  LinearLayout: 'Lin', FrameLayout: 'Frm', RelativeLayout: 'Rel',
+  ConstraintLayout: 'Con', RecyclerView: 'Rcv', ScrollView: 'Scr',
+  ViewGroup: 'VG', View: 'V', WebView: 'Web', ProgressBar: 'Prg',
+  Spinner: 'Spn', SeekBar: 'Seek', TabLayout: 'Tab',
+  TextInputEditText: 'Edt', AppCompatButton: 'Btn', AppCompatTextView: 'Txt',
+  AppCompatImageView: 'Img', AppCompatEditText: 'Edt', AppCompatCheckBox: 'Chk',
+  MaterialButton: 'Btn', MaterialTextView: 'Txt',
+};
+
 /**
- * Format element for display
+ * Format element in compact notation: idx|Class|id:val|txt:val|flags|cx,cy
+ * Flags: c=clickable s=scrollable f=focused k=checked d=disabled
  */
 export function formatElement(el: UiElement): string {
-  const parts: string[] = [];
-  const shortClass = el.className.split(".").pop() ?? el.className;
+  const rawClass = el.className.split(".").pop() ?? el.className;
+  const cls = CLASS_SHORT[rawClass] ?? rawClass;
 
-  parts.push(`[${el.index}]`);
-  parts.push(`<${shortClass}>`);
+  const parts: string[] = [`${el.index}`, cls];
 
   if (el.resourceId) {
     const shortId = el.resourceId.split(":id/").pop() ?? el.resourceId;
-    parts.push(`id="${shortId}"`);
+    parts.push(`id:${shortId}`);
   }
 
   if (el.text) {
-    parts.push(`text="${el.text.slice(0, 50)}${el.text.length > 50 ? "..." : ""}"`);
+    parts.push(`${el.text.slice(0, 40)}${el.text.length > 40 ? "…" : ""}`);
+  } else if (el.contentDesc) {
+    parts.push(`d:${el.contentDesc.slice(0, 25)}${el.contentDesc.length > 25 ? "…" : ""}`);
   }
 
-  if (el.contentDesc) {
-    parts.push(`desc="${el.contentDesc.slice(0, 30)}${el.contentDesc.length > 30 ? "..." : ""}"`);
-  }
+  let flags = '';
+  if (el.clickable) flags += 'c';
+  if (el.scrollable) flags += 's';
+  if (el.focused) flags += 'f';
+  if (el.checked) flags += 'k';
+  if (!el.enabled) flags += 'd';
+  if (flags) parts.push(flags);
 
-  const flags: string[] = [];
-  if (el.clickable) flags.push("clickable");
-  if (el.scrollable) flags.push("scrollable");
-  if (el.focused) flags.push("focused");
-  if (el.checked) flags.push("checked");
-  if (!el.enabled) flags.push("disabled");
+  parts.push(`${el.centerX},${el.centerY}`);
 
-  if (flags.length > 0) {
-    parts.push(`(${flags.join(", ")})`);
-  }
-
-  parts.push(`@ (${el.centerX}, ${el.centerY})`);
-
-  return parts.join(" ");
+  return parts.join('|');
 }
 
+/** Container class names to prune when empty (no text, no id, not interactive) */
+const CONTAINER_CLASSES = new Set([
+  'LinearLayout', 'FrameLayout', 'RelativeLayout', 'ConstraintLayout',
+  'ViewGroup', 'View', 'CoordinatorLayout', 'AppBarLayout',
+  'CollapsingToolbarLayout', 'CardView', 'NestedScrollView',
+]);
+
 /**
- * Format UI tree for display (simplified view)
+ * Format UI tree in compact notation.
+ * Legend: idx|Class|id:val|text|flags|cx,cy
+ * Flags: c=clickable s=scrollable f=focused k=checked d=disabled
  */
 export function formatUiTree(elements: UiElement[], options?: {
   showAll?: boolean;
@@ -211,17 +228,18 @@ export function formatUiTree(elements: UiElement[], options?: {
 }): string {
   const { showAll = false, maxElements = 100 } = options ?? {};
 
-  // Filter to only meaningful elements
+  // Filter to meaningful elements, prune empty containers
   let filtered = showAll
     ? elements
-    : elements.filter(el =>
-        el.text ||
-        el.contentDesc ||
-        el.clickable ||
-        el.scrollable ||
-        el.focusable ||
-        el.resourceId.includes(":id/")
-      );
+    : elements.filter(el => {
+        // Keep elements with content or interactivity
+        if (el.text || el.contentDesc || el.clickable || el.scrollable) return true;
+        if (el.resourceId.includes(":id/")) return true;
+        // Prune empty containers (Layout/ViewGroup with no text/id/interactivity)
+        const rawClass = el.className.split(".").pop() ?? '';
+        if (CONTAINER_CLASSES.has(rawClass)) return false;
+        return el.focusable;
+      });
 
   if (filtered.length > maxElements) {
     filtered = filtered.slice(0, maxElements);

@@ -157,5 +157,19 @@ export declare class AdbClient {
      * Get CPU info
      */
     getCpuInfo(): string;
+    /**
+     * Connect to a device over WiFi ADB.
+     * Note: WiFi commands are global (no -s flag needed).
+     */
+    connectWifi(ip: string, port: number): string;
+    /**
+     * Pair with a device over WiFi ADB (Android 11+).
+     */
+    pairWifi(ip: string, port: number, code: string): string;
+    /**
+     * Disconnect from a WiFi ADB device.
+     * If no ip/port given, disconnects all WiFi devices.
+     */
+    disconnectWifi(ip?: string, port?: number): string;
 }
 //# sourceMappingURL=client.d.ts.map

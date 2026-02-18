@@ -59,11 +59,14 @@ export declare function findElements(elements: UiElement[], criteria: {
     visible?: boolean;
 }): UiElement[];
 /**
- * Format element for display
+ * Format element in compact notation: idx|Class|id:val|txt:val|flags|cx,cy
+ * Flags: c=clickable s=scrollable f=focused k=checked d=disabled
  */
 export declare function formatElement(el: UiElement): string;
 /**
- * Format UI tree for display (simplified view)
+ * Format UI tree in compact notation.
+ * Legend: idx|Class|id:val|text|flags|cx,cy
+ * Flags: c=clickable s=scrollable f=focused k=checked d=disabled
  */
 export declare function formatUiTree(elements: UiElement[], options?: {
     showAll?: boolean;
